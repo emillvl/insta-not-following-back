@@ -21,26 +21,41 @@
       await sleep(500);
       attempts++;
     }
-
     if (!dialog) throw new Error('Modal bulunamadı');
 
-    const scrollContainer = dialog.querySelector('div[class*="x1dm5mii"]') || dialog.querySelector('div[style*="overflow"]') || dialog;
-    if (!scrollContainer) throw new Error('Kaydırılabilir alan bulunamadı');
+    const possibleScrolls = Array.from(dialog.querySelectorAll('div'))
+      .filter(div => div.scrollHeight > div.clientHeight && div.clientHeight > 0);
 
-    let prevHeight = 0, stableCount = 0;
-    while (stableCount < 5) {
-      scrollContainer.scrollTo(0, scrollContainer.scrollHeight);
-      await sleep(1000);
-      if (scrollContainer.scrollHeight === prevHeight) {
-        stableCount++;
+    if (possibleScrolls.length === 0) throw new Error('Kaydırılabilir alan bulunamadı');
+
+    const scrollContainer = possibleScrolls.reduce((a, b) =>
+      a.scrollHeight > b.scrollHeight ? a : b
+    );
+
+    let prevHeight = 0;
+    let prevCount = 0;
+    let stableLoops = 0;
+
+    while (stableLoops < 5) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      await sleep(700);
+
+      const items = dialog.querySelectorAll('a[href^="/"][role="link"]');
+      const currentCount = items.length;
+
+      if (scrollContainer.scrollHeight === prevHeight && currentCount === prevCount) {
+        stableLoops++;
       } else {
-        stableCount = 0;
+        stableLoops = 0;
         prevHeight = scrollContainer.scrollHeight;
+        prevCount = currentCount;
       }
     }
 
     const items = dialog.querySelectorAll('a[href^="/"][role="link"]');
-    return Array.from(items).map(a => a.textContent.trim()).filter(Boolean);
+    return Array.from(items)
+      .map(a => a.textContent.trim())
+      .filter(Boolean);
   }
 
   async function closeModal() {
