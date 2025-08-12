@@ -17,6 +17,8 @@ It opens your Following & Followers lists automatically, scrolls until the end �
 
 🎯 Displays results in a purple popup with clickable profile links.
 
+☑️Shows verified users too.
+
 ## 💡 Why This Approach?
 🖱 Modal scraping → Instagram loads lists inside modals dynamically.
 
@@ -74,6 +76,8 @@ Otomatik olarak Takip edilenler ve Takipçiler listelerini açar 📜, en sona k
 🔄 Listeleri karşılaştırır.
 
 🎯 Sonuçları popup ile gösterir (profil linkleri tıklanabilir).
+
+☑️Dogrulanmis hesaplari gosterir.
 
 ## 💡 Neden Bu Yöntem?
 🖱 Modal tabanlı toplama → Instagram listeleri dinamik yükler.
