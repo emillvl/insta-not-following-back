@@ -168,3 +168,5 @@
     alert(`Hata: ${error.message}`);
   }
 })();
+
+// All rights & code belongs to the author(Emil Veliyev). Enjoy !!!
