@@ -1,122 +1,98 @@
-## 📸 Instagram Not Following Back Checker
+##  📌 Instagram Follow/Unfollow Analyzer
+##  🇬🇧 English
 
-## 🇬🇧 English Version
+A simple client-side JavaScript tool that analyzes your followers and following lists on Instagram and shows you who does not follow you back.
 
-## 📜 Description
-This JavaScript snippet lets you find who doesn’t follow you back on Instagram.
-It opens your Following & Followers lists automatically, scrolls until the end 📜, collects all usernames 👤, compares them, and then shows the ones not following you back in a stylish popup 🎨.
+This script runs in your browser console (no backend, no credentials collected) and creates a styled overlay with results.
 
-## ⚙️ How It Works
-🔍 Opens Following list (via the link in your profile).
+##  ⚠️ Disclaimer: This project is for educational and personal use only. It is not affiliated with Instagram, Meta, or any third party. Using automation scripts may be against Instagram’s Terms of Service — use responsibly.
 
-📜 Scrolls & collects usernames until no more load.
+##  ✨ Features
 
-🔁 Repeats for Followers list.
+Collects your Followers and Following lists automatically
 
-🔄 Compares lists to find the difference.
+Detects users that you follow but who don’t follow you back
 
-🎯 Displays results in a purple popup with clickable profile links.
+Displays results in a styled popup overlay
 
-☑️Shows verified users too.
+Simple copy-paste usage, no setup required
 
-## 💡 Why This Approach?
-🖱 Modal scraping → Instagram loads lists inside modals dynamically.
+Written in vanilla JavaScript (async/await, DOM manipulation)
 
-🔄 Scroll detection → Stops when no new users appear (no guessing scroll count).
+##  🚀 How to Use
 
-📦 No dependencies → Runs in the browser console.
+Open Instagram
+ in your browser and log into your account.
 
-🎨 Custom UI → Popup doesn’t mess with page layout.
+Navigate to your profile page.
 
-## 📖 Usage Guide
-🌐 Open instagram.com and log in.
+Open Developer Tools → Console (Ctrl+Shift+J on Windows, Cmd+Opt+J on Mac).
 
-👤 Go to your profile.
+Copy-paste the script from `f4fchecker.js`
+ into the console.
 
-🖥 Open browser console:
+Wait for the script to finish → a popup will appear listing users who don’t follow you back.
 
-Chrome: Ctrl+Shift+J (Win/Linux) or Cmd+Option+J (Mac)
 
-Firefox: Ctrl+Shift+K (Win/Linux) or Cmd+Option+K (Mac)
+## ⚠️ Warnings
 
-📋 Paste the script & press Enter.
+This script only works for the account you are logged into.
 
-⏳ Wait until popup appears.
+It does not steal or send your credentials/data.
 
-🖱 Click usernames to visit their profile.
+Instagram may change its HTML structure anytime, breaking the script.
 
-❌ Close with the red Kapat button.
-
-## ⚠️ Tips & Tricks
-⌛ Slow internet? Increase the sleep durations.
-
-📜 Works dynamically → stops only when all usernames are loaded.
-
-🎨 You can change colors/fonts in box.style.
-
-📵 Don’t spam — Instagram may rate-limit modal openings.
-
-💻 Designed for desktop browsers.
+Use at your own risk.
 
 ## 📜 License
-MIT License
 
-## 🇹🇷 Türkçe Versiyon
-## 📜 Açıklama
-Bu JavaScript betiği, Instagram’da seni takip etmeyen kullanıcıları bulur.
-Otomatik olarak Takip edilenler ve Takipçiler listelerini açar 📜, en sona kadar kaydırır ⬇️, tüm kullanıcı adlarını toplar 👤, karşılaştırır ve seni takip etmeyenleri şık bir popup içinde 🎨 gösterir.
+All rights & code belong to the author (Emil Veliyev). You are free to use this for personal & educational purposes.
 
-## ⚙️ Nasıl Çalışır?
-🔍 Takip edilenler listesini açar.
+##  🇹🇷 Türkçe
 
-📜 Kaydırır ve kullanıcıları toplar.
+Instagram’da takipçi (followers) ve takip edilen (following) listelerini analiz edip, seni takip etmeyen kişileri gösteren basit bir JavaScript aracıdır.
 
-🔁 Takipçiler listesi için tekrarlar.
+Bu script tamamen tarayıcı konsolunda çalışır (sunucu yok, şifre toplanmaz) ve sonucu şık bir pencere (popup) olarak ekrana getirir.
 
-🔄 Listeleri karşılaştırır.
+##  ⚠️ Uyarı: Bu proje yalnızca eğitim ve kişisel kullanım içindir. Instagram, Meta veya başka herhangi bir kuruluşla ilişkili değildir. Instagram’ın kullanım şartlarına aykırı olabilir — sorumluluk kullanıcıya aittir.
 
-🎯 Sonuçları popup ile gösterir (profil linkleri tıklanabilir).
+##  ✨ Özellikler
 
-☑️Dogrulanmis hesaplari gosterir.
+Takipçi ve takip edilen listelerini otomatik toplar
 
-## 💡 Neden Bu Yöntem?
-🖱 Modal tabanlı toplama → Instagram listeleri dinamik yükler.
+Seni takip etmeyen kullanıcıları bulur
 
-🔄 Akıllı kaydırma → Yeni kullanıcı gelmeyince durur.
+Sonuçları şık bir pencere (popup) içinde gösterir
 
-📦 Ekstra kütüphane yok → Tarayıcı konsolunda çalışır.
+Basit kopyala-yapıştır kullanımı, ek kurulum gerektirmez
 
-🎨 Sayfa düzenini bozmaz → Popup kutusu sayfanın üstünde çıkar.
+Vanilla JavaScript ile yazılmıştır (async/await, DOM manipülasyonu)
 
-## 📖 Kullanım Kılavuzu
-🌐 instagram.com adresine gir ve oturum aç.
+##  🚀 Nasıl Kullanılır
 
-👤 Profiline git.
+Instagram
+’ı aç ve hesabına giriş yap.
 
-🖥 Tarayıcı konsolunu aç:
+Profil sayfana git.
 
-Chrome: Ctrl+Shift+J (Win/Linux) veya Cmd+Option+J (Mac)
+Geliştirici Konsolu’nu aç (Ctrl+Shift+J Windows, Cmd+Opt+J Mac).
 
-Firefox: Ctrl+Shift+K (Win/Linux) veya Cmd+Option+K (Mac)
+`f4fchecker.js`
+ içindeki kodu kopyala ve konsola yapıştır.
 
-📋 Script’i yapıştır ve Enter’a bas.
+Script çalıştıktan sonra ekranda seni takip etmeyen kullanıcıların listesi görünecek.
 
-⏳ Popup çıkana kadar bekle.
 
-🖱 Kullanıcı adlarına tıklayarak profillerini aç.
+##  ⚠️ Uyarılar
 
-❌ Kapat butonuna basarak kutuyu kapat.
+Script sadece giriş yaptığın hesabında çalışır.
 
-## ⚠️ İpuçları & Püf Noktaları
-⌛ İnternetin yavaşsa sleep sürelerini artırabilirsin.
+Şifre veya verini almaz/göndermez.
 
-📜 Kaydırma algoritması otomatik durur → eksiksiz liste.
+Instagram HTML yapısını değiştirebilir → script bozulabilir.
 
-🎨 Renk/font değiştirmek için box.style kısmını düzenle.
+Kullanım tamamen senin sorumluluğunda.
 
-📵 Çok sık kullanma, Instagram sınırlayabilir.
+##  📜 Lisans
 
-💻 Masaüstü tarayıcılar için tasarlandı.
-
-## 📜 Lisans
-MIT Lisansı
+Tüm hakları ve kod yazarlığı (c) Emil Veliyev’e aittir. Kişisel ve eğitim amaçlı kullanım serbesttir.
