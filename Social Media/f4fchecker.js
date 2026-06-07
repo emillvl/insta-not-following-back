@@ -1,14 +1,24 @@
 (async () => {
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   
-  const username = location.pathname.replace(/\//g, '');
+  const username = location.pathname.replace(/\//g, '').split('?')[0];
 
   async function openList(type) {
-    const links = Array.from(document.querySelectorAll('a'));
-    const target = links.find(link => link.getAttribute('href') === `/${username}/${type}/`);
-    if (!target) throw new Error(`${type} bağlantısı bulunamadı`);
+    const elements = Array.from(document.querySelectorAll('a, button, span[role="button"]'));
+    
+    const keywords = type === 'following' 
+      ? ['following', 'takip edilen', 'takip ettiğin'] 
+      : ['followers', 'takipçi', 'takipçiler'];
+
+    const target = elements.find(el => {
+      const text = el.textContent.toLowerCase().trim();
+      return keywords.some(keyword => text.includes(keyword));
+    });
+
+    if (!target) throw new Error(`${type} bağlantısı (metin tabanlı) bulunamadı. Profil sayfasında mısınız?`);
+    
     target.click();
-    await sleep(3000); 
+    await sleep(4000); 
   }
 
   async function scrollAndCollect() {
@@ -83,6 +93,7 @@
       'div[role="dialog"] svg[aria-label="Close"]',
       'div[role="dialog"] button[aria-label="Close"]',
       'div[role="dialog"] svg[aria-label="Kapat"]',
+      'div[role="dialog"] button[aria-label="Kapat"]',
       'div[role="dialog"] [data-visualcompletion="css-img"]'
     ];
 
@@ -96,7 +107,8 @@
       }
     }
 
-    const backdrop = document.querySelector('div[role="dialog"]').parentElement;
+    const dialog = document.querySelector('div[role="dialog"]');
+    const backdrop = dialog ? dialog.parentElement : null;
     if (backdrop) {
       backdrop.click();
       await sleep(2000);
@@ -112,7 +124,7 @@
     console.log(`Found ${followingList.length} following`);
     await closeModal();
 
-    await sleep(2000); 
+    await sleep(2500); 
 
     console.log('Collecting followers list...');
     await openList("followers");
