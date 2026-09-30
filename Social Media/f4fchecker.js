@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 Emil Veliyev
+
 (async () => {
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   
@@ -181,4 +184,3 @@
   }
 })();
 
-// All rights & code belongs to the author(Emil Veliyev). Enjoy !!!
