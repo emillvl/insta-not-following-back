@@ -1,6 +1,6 @@
 # Instagram Follow-Back Analyzer
 
-A lightweight browser-console utility that compares the accounts you follow with the accounts that follow you, then shows the accounts that do not follow you back.
+Compare your Instagram Following and Followers lists from your browser's console. The script shows which accounts you follow that do not follow you back.
 
 The script runs entirely in the Instagram page you already have open. It does not require a backend, account password, API token, browser extension, or external service.
 
@@ -42,9 +42,9 @@ Browser shortcuts can vary.
 
 Instagram loads follower and following lists incrementally while you scroll.
 
-The script therefore waits between scrolls and stops only after the list remains stable for several iterations. These pauses are intentional: removing them can make the script finish before Instagram has rendered the complete list.
+The script waits between scrolls and stops after the list remains stable for several iterations. Shortening those pauses can make it stop before Instagram has loaded the full list.
 
-Larger accounts will naturally take longer to process than smaller ones.
+Larger lists take longer to collect.
 
 ## Data and privacy
 
@@ -114,7 +114,7 @@ A working version today can require selector or timing adjustments after a futur
 
 The implementation is a single asynchronous JavaScript routine.
 
-Key ideas:
+The implementation uses:
 
 - `Set` is used for deduplication and efficient membership checks.
 - usernames are derived from profile-link `href` values rather than display text;
@@ -159,4 +159,4 @@ The Apache-2.0 license permits use, modification, and redistribution under its s
 
 ## Author
 
-Emil Veliyev — [@emillvl](https://github.com/emillvl)
+Emil Veliyev · [@emillvl](https://github.com/emillvl)
