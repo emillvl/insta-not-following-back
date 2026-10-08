@@ -8,6 +8,9 @@ A Chrome extension that checks which Instagram accounts you follow don't follow
 you back. It opens your own profile, reads the following and follower lists, and
 shows the results on Instagram.
 
+The original browser-console script is on
+[DevConsole-Version](https://github.com/emillvl/insta-not-following-back/tree/DevConsole-Version).
+
 ## Install and use
 
 1. Open `chrome://extensions` and enable Developer mode.
@@ -107,3 +110,7 @@ Instagram can change its markup or hide accounts. Counts and settling cannot
 prove a snapshot of memberships that change during checking. Switching tabs can
 delay execution. Automated tests use Edge fixtures; they do not establish
 compatibility with every live Instagram layout or language.
+
+## License
+
+[Apache License 2.0](LICENSE).
