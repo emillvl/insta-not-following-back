@@ -106,7 +106,7 @@ async function handle(message, sender) {
       if (operation.status !== 'completed') throw new Error('No completed results are available.');
       if (!operation.results) throw new Error('Results are no longer available. Start another check.');
       let tab;
-      try { tab = await foreground(operation.tabId); } catch { /* Tab was closed. */ }
+      try { tab = await foreground(operation.tabId); } catch {}
       if (!tab || !/^https:\/\/(www\.)?instagram\.com\//.test(tab.url || '')) {
         tab = await chrome.tabs.create({ url: 'https://www.instagram.com/', active: true });
         await chrome.windows.update(tab.windowId, { focused: true });

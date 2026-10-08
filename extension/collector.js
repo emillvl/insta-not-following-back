@@ -1,4 +1,4 @@
-/* Validated DOM collection. The supplied checker and its comparison remain separate. */
+
 globalThis.F4FCollector = (() => {
   const ROWS = 'a[role="link"][href^="/"]';
   const OPEN_MS = 3000, SETUP_MS = 2000, STEP_MS = 1500, CLOSE_MS = 2000;
@@ -27,7 +27,6 @@ globalThis.F4FCollector = (() => {
     void F4FBridge.progress?.(current.type, current.users.size, current.expected);
   }
   function addHref(href) {
-    // Preserve the original username extraction, exclusions, Set order and case.
     if (!href || !href.startsWith('/') || href.length <= 1) return;
     const name = href.split('/')[1].split('?')[0];
     if (name && !name.includes('/') && name !== 'explore' && name !== 'reels') current.users.add(name);
@@ -60,7 +59,6 @@ globalThis.F4FCollector = (() => {
   function flush() {
     if (current.observer) mutations(current.observer.takeRecords());
   }
-  // Data arriving early never shortens the baseline interaction delays.
   async function wait(ms) {
     check();
     await new Promise(resolve => setTimeout(resolve, ms));
@@ -89,7 +87,6 @@ globalThis.F4FCollector = (() => {
   }
   async function ensureDialog() {
     if (current.dialog.isConnected) return;
-    // Keep pending rows from the old render before changing observers.
     flush(); current.observer.disconnect();
     const message = 'The Instagram list disappeared and did not reopen. Retry checking.';
     if (++current.recoveries > MAX_DIALOG_RECOVERIES) throw failure(message, 'interrupted');
@@ -110,15 +107,12 @@ globalThis.F4FCollector = (() => {
     return failure(`Incomplete ${current.type} scan: collected ${current.users.size} of ${current.expected}. Instagram stopped loading accounts. Retry checking; no non-followers were confirmed.`);
   }
   function validateSize() {
-    // Displayed totals can omit deactivated accounts. Keep every original row;
-    // the total is a lower bound, and baseline settling is also required.
     return current.users.size >= current.expected;
   }
   function step() {
     const area = current.area;
     const top = area.scrollTop;
     const height = area.clientHeight;
-    // Jump across rows already captured, but never across an unseen virtual gap.
     const last = current.lastRow?.isConnected ? current.lastRow : null;
     const knownBottom = last ? last.getBoundingClientRect().bottom - area.getBoundingClientRect().top + top : top;
     const target = Math.min(area.scrollHeight - height, Math.max(top, knownBottom - height * .2));
@@ -176,8 +170,6 @@ globalThis.F4FCollector = (() => {
       if (stableLoops >= STABLE_PASSES && atEnd) {
         if (validateSize() && !loading()) break;
         if (retries >= RETRY_WAITS.length) throw countError();
-        // Additional quiet waits help slow loading; they never speed up clicks
-        // or trigger back-and-forth scroll nudges.
         await wait(RETRY_WAITS[retries++]);
       } else {
         if (area) {
@@ -232,7 +224,7 @@ globalThis.F4FCollector = (() => {
   }
   function dispose() {
     current?.observer?.disconnect();
-    if (current?.dialog?.isConnected) { try { clickClose(current.dialog); } catch { /* Best-effort owned-dialog cleanup. */ } }
+    if (current?.dialog?.isConnected) { try { clickClose(current.dialog); } catch {} }
     current = null;
     for (const type of ['following', 'followers']) delete reports[type];
   }

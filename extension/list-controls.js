@@ -1,4 +1,4 @@
-/* Profile controls and exact count recognition. No account comparison occurs here. */
+
 globalThis.F4FListControls = (() => {
   const labels = {
     followers: ['followers', 'follower', 'takipçi', 'seguidores', 'abonnés', 'abonné',
@@ -50,7 +50,6 @@ globalThis.F4FListControls = (() => {
   function find(document, username, type) {
     const canonical = `/${username}/${type}/`;
     const links = Array.from(document.querySelectorAll('a'));
-    // Keep the original exact-href choice and ordering when it is available.
     const original = links.find(link => link.getAttribute('href') === canonical);
     if (original) return original;
     const equivalent = links.find(link => sameListHref(link.getAttribute('href'), username, type));
@@ -62,14 +61,11 @@ globalThis.F4FListControls = (() => {
         !label.getClientRects().length || getComputedStyle(label).visibility === 'hidden') continue;
       if (![label.textContent, label.getAttribute('aria-label'), label.getAttribute('title')]
         .some(text => matchesLabel(text, type))) continue;
-      // Click the site's native control. Bare label spans also dispatch a native
-      // bubbling click to Instagram's enclosing event handler; no synthetic DOM links.
       const control = label.closest('a, button, [role="button"], [role="link"]') || label;
       const href = control.getAttribute('href');
       if (href && !href.startsWith('#') && !sameListHref(href, username, type)) continue;
       candidates.add(control);
     }
-    // Nested label wrappers represent one control: choose the innermost match.
     const leaves = [...candidates].filter(control => ![...candidates].some(other =>
       other !== control && control.contains(other)));
     return leaves.length === 1 ? leaves[0] : null;
@@ -82,8 +78,6 @@ globalThis.F4FListControls = (() => {
       if (links.some(link => link.getAttribute('href') === canonical)) continue;
       const control = find(document, username, type);
       if (!control) continue;
-      // Only the original openList('a') lookup sees this wrapper. Its click is
-      // bound to the actual Instagram control. Dialog collection remains native.
       links.push(new Proxy(control, {
         get(target, property) {
           if (property === 'getAttribute') return name => name === 'href' ? canonical : target.getAttribute(name);

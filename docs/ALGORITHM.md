@@ -1,135 +1,83 @@
-# Immutable checker baseline
+# Checker and collection
 
-Original input: `f4fchecker.js` (5,818 bytes). SHA-256:
+## Original script
+
+`f4fchecker.js` is 5,818 bytes. Its SHA-256 is
 `6b21281d11d84690d2bbf993b3ac3c0ba6c64cd38bfb4e5dc897443752ee9d23`.
 
-No runtime dependencies. It is a self-executing async browser script using DOM,
-Set, promises, timers, console and alert. Its profile username comes from the
-current pathname, with slashes removed.
+The original script:
 
-## Exact behavior preserved
+- Gets the username from the current pathname.
+- Clicks the exact `/<username>/following/` link and waits 3,000 ms.
+- Finds a dialog with up to thirty 500 ms checks, waits 2,000 ms, and chooses
+  the overflowing descendant with the greatest scroll height.
+- Scrolls to the bottom and waits 1,500 ms per pass. It collects
+  `a[role="link"][href^="/"]`, takes the first path component before `?`,
+  and excludes `explore` and `reels`.
+- Finishes after eight stable-height passes with at least three consecutive
+  passes containing no new accounts.
+- Closes the dialog, waits 2,000 ms, and waits another 2,000 ms before opening
+  followers. It repeats collection and closure.
+- Computes following minus followers with case-sensitive Sets and insertion order.
+- Shows one category, its count, actual list totals, and profile links. Labels
+  and errors are Turkish.
 
-This section describes the standalone source and reference `checker-runner.js`.
-The current extension uses `safe-runner.js` with the explicitly requested
-collection safeguards below. Version 1.0.6 restores baseline delays and settling
-while retaining scrolling that avoids skipping unseen virtual rows.
+The original file is unchanged. The baseline commit normalized CRLF because of
+Git's line-ending configuration. The committed file was restored to its supplied
+CRLF bytes; `.gitattributes` preserves the source and runners.
 
-- `openList(type)` finds an anchor whose href equals `/${username}/${type}/`,
-  clicks it, then waits 3,000 ms.
-- `scrollAndCollect()` checks `div[role="dialog"]` up to 30 times, 500 ms apart;
-  waits 2,000 ms; chooses the overflowing descendant div with greatest
-  scrollHeight; moves to its bottom, waits 1,500 ms per pass; collects
-  `a[role="link"][href^="/"]`; extracts the first path component before `?`;
-  excludes only `explore` and `reels`. It retains Set insertion order.
-- It stops after eight stable-height passes with at least three consecutive
-  no-new-user passes. No timeout, pagination API or alternative scraper is added.
-- `closeModal()` uses its original ordered selectors (English Close, Turkish
-  Kapat, then css-img), button/parent click, parent backdrop fallback and 2,000 ms wait.
-- Execution collects following, closes, waits 2,000 ms, collects followers,
-  closes, then computes followingSet minus followersSet, case-sensitive and
-  insertion-ordered. There is one result category: not following back.
-- Output includes category count, original following/follower list lengths,
-  ordered username links, a close action and target-blank profile actions.
-  There are no filters, sort controls, exports or other categories in the input.
-- Original errors are logged and alerted in Turkish.
+## Extension
 
-## Reference integration boundary
+The worker selects an Instagram tab, brings it to the foreground, and asks
+`content.js` to open the native Profile control. The own page's Edit profile
+control confirms ownership. Readiness waits up to sixty seconds through login
+and profile navigation. Paths alone do not establish ownership.
 
-The build embeds the entire original file as an unchanged byte sequence in
-`extension/checker-runner.js`. A lexical `document` proxy delegates to the real
-document and adds localized Close lookup **only when the original selector
-fails**. The separate `list-controls.js` interface adapter also extends the
-original top-level `querySelectorAll('a')` lookup when an exact list href is absent:
-it recognizes equivalent absolute/slashless hrefs or the visible labelled native
-button/span and exposes its canonical list href to `openList`. The wrapper's
-click remains bound to the actual Instagram element (label clicks bubble to the
-site's enclosing handler). It leaves exact original links first and unchanged.
-No HTML anchors are inserted and no global DOM APIs are replaced. Crucially,
-`dialog.querySelectorAll(...)`, scrolling, stability tests, sleeps, Set comparison
-and original output are untouched. This changes interface recognition only.
-The lexical alert adapter records the original error in the extension instead
-of opening a blocking alert. These are UI integrations, not algorithm changes.
+`list-controls.js` accepts exact original links first, then equivalent
+absolute/slashless links and labelled native controls or nested count spans.
+Clicks use Instagram's existing handlers. Close labels support English, Turkish,
+Spanish, French, German, Italian, Portuguese, Russian, Arabic, Japanese, and
+Korean. Supported labels have fixture coverage; live translations can change.
 
-The adapter awaits the original IIFE, detects an original error, then requires
-the original results box before publishing completion. It reads the generated
-output, restyles the original box, and retains its close/profile actions. No
-parallel comparison is used to generate production results. SHA verification,
-verbatim runner checks and differential full-script fixtures guard integrity.
+`checker-runner.js` embeds the original script. Its document adapter extends
+only interface recognition. `safe-runner.js` delegates list opening, collection,
+and closure to `collector.js`; the original comparison, output, and between-list
+wait remain verbatim. The worker injects the production runner into Chrome's
+isolated content-script world.
 
-The baseline's limitations (including possible incomplete DOM lists, no hard
-timeout for continuously changing lists, and case-sensitive comparisons) are
-preserved intentionally. Navigation/readiness timeouts are outside the checker.
+The collector uses the original 3,000 ms opening wait, 2,000 ms setup, 1,500 ms
+scroll cadence, 2,000 ms closing wait, and eight stable passes. Arriving data never
+shortens these waits. It captures mounted rows before scrolling and observes
+added, removed, and recycled rows, including old href values. Extraction,
+exclusions, case, and Set order remain unchanged.
 
-## Validated collection and baseline pacing used by version 1.0.6
+A cached last row limits scrolling to captured coverage. Replaced scroll
+containers are reacquired. Missing dialogs get three seconds to return at a paced
+check and up to four consecutive observed replacements without new accounts.
+Completion requires reaching the end, settled height and membership, no visible
+loading indicator, and collected totals at least as large as displayed counts.
+Deactivated rows are retained above those totals.
 
-The user's subsequent request explicitly authorized completion validation,
-safer collection and adaptive waits/bounded retries. These collection changes
-live in `collector.js`. The build generates a separate `safe-runner.js` from the
-immutable source by replacing only the openList, scrollAndCollect and closeModal
-delegates. The original comparison, result generation, labels, category and
-two-second between-list wait remain verbatim. The production worker injects
-collector/adapter/safe-runner; the old runner remains a reference.
+Exact counts accept localized integers and grouped thousands, including Arabic,
+Persian, and fullwidth digits. Rounded values require an exact title or accessible
+value. Profile totals are read again before publication. Incomplete settled
+lists get waits of 3, 6, and 10 seconds; new accounts reset the retry budget.
+Each list has a 20-minute deadline. Empty lists skip opening; short lists can
+settle without scrolling.
 
-The collector reads exact following/follower counts from the recognized native
-controls. It accepts unambiguous localized integers and grouped thousands,
-including Arabic/Persian/fullwidth digits. Rounded values such as 10K/1.2M are
-not exact; an exact title or accessibility value may provide the integer.
-Missing or contradictory exact counts prevent verified completion.
+The adapter requires the original result box and the collector's verified,
+settled evidence. The worker checks that evidence before saving results.
+A failed scan publishes no non-followers. A storage quota error retains the
+verified on-page result. Owned observers and dialogs are cleaned up after a run.
 
-Each list starts by capturing mounted rows before scrolling. A single observer
-collects added/removed nodes and href changes, preserving recycled anchors' old
-and new values. Collection retains the original href extraction, reserved-name
-exclusions, case sensitivity and Set insertion order. A cached last mounted
-anchor bounds safe scrolling, so an unseen virtual gap is not skipped and no
-full-list query is repeated on each scroll. Replaced scroll containers are
-recognized and scanned once. Already captured mounted rows can be crossed in
-one step; virtual windows retain viewport overlap.
+Counts and settling cannot establish an atomic snapshot. Membership can change
+without changing totals, and displayed counts cannot prove that every deactivated
+account was exposed.
 
-Every nonempty list uses the original 3,000 ms opening wait, 2,000 ms setup,
-1,500 ms per scroll pass and 2,000 ms closing wait. The source's between-list
-2,000 ms pause remains unchanged. Row mutations never shorten these waits.
-The original settling condition is restored: eight stable-height passes with
-at least three consecutive no-new-account passes. Completion also requires
-reaching the end of the scroll area and no visible loading indicator.
-Back-and-forth scroll nudges are removed. Incomplete settled lists get extra
-quiet waits of 3, 6 and 10 seconds; new accounts reset this bounded retry budget.
-Each list has a 20-minute deadline even if content keeps changing. Dialog
-discovery and closure are separately bounded. Empty lists skip opening; short
-non-scrolling lists still undergo the original settling checks.
+## Timing
 
-Both collected totals must be at least the exact initial displayed counts;
-deactivated rows can legitimately exceed those counts and are kept unchanged.
-Profile totals are read again before publication. The adapter and worker require
-verified and settled evidence before completion; an overshoot by itself never
-finishes collection. A collection/validation failure publishes no non-followers and
-removes a prematurely generated result box. Owned observers/dialogs are cleaned
-up. Counts are a consistency check, not an atomic snapshot guarantee: list
-membership can change without changing totals during sequential collection.
-
-Version 1.0.4's healthy 10,000-follower cumulative fixture with its accelerated
-interaction cadence measured 106,383 ms for the reference and 9,958 ms for
-validated collection using actual browser timers. That faster cadence was
-removed in version 1.0.6 at the user's request.
-Full totals and result accounts matched, including followed accounts appearing
-in the first, middle and final follower batches. This is fixture evidence;
-Instagram's live loading delays and DOM behavior still determine actual times.
-
-The current small healthy fixture's unshortened timer trace exactly matches
-the original: two 3,000 ms waits, five 2,000 ms waits and twenty-two 1,500 ms
-waits. The original took 49,123 ms and the current collector 49,130 ms, with
-identical accounts and summary. This confirms baseline pacing on the fixture,
-not live Instagram compatibility or the cause of any account restriction.
-
-## Original reference timing audit
-
-`npm run test:timing` executes the original on anchors and the packaged adapter
-on native buttons concurrently in isolated browser fixtures, with actual timers
-and no clock acceleration. On the two-account lists used in that fixture, the
-latest measured executions were 49,186 ms and 49,085 ms respectively. Each used
-two 3,000 ms opening waits, five 2,000 ms setup/close/between-list waits and
-twenty-two 1,500 ms scrolling waits. Both lists reached stability 8/8; requested
-wait sequences, click order, collected output and stability logs matched exactly.
-Twenty-two scrolling passes is a fixture result, not a fixed production count.
-The original loop always waits for eight stable passes after its no-new-user
-condition, and can run longer as new accounts arrive. Its missing-dialog retry
-limit is still the exact original 30 attempts with a 500 ms wait per failed attempt.
+The current healthy two-account fixture uses the exact original wait sequence:
+two 3,000 ms waits, five 2,000 ms waits, and twenty-two 1,500 ms waits. Measured
+times were 49,123 ms for the original and 49,130 ms for the collector, with
+identical accounts and summary. The number of scroll passes depends on loading.
+These fixture measurements do not predict live Instagram completion times.

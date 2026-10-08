@@ -1,4 +1,4 @@
-/* Appearance is local to the extension's surfaces, independent of checker state. */
+
 (() => {
   if (globalThis.F4FTheme) return;
   const modes = new Set(['system', 'light', 'dark']);

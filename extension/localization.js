@@ -1,4 +1,4 @@
-/* Recognition only. The original collection and comparison never use translations. */
+
 globalThis.F4FSelectors = (() => {
   const closeLabels = ['Close', 'Kapat', 'Cerrar', 'Fermer', 'Schließen', 'Chiudi',
     'Fechar', 'Закрыть', 'إغلاق', '閉じる', '닫기'];
@@ -30,8 +30,6 @@ globalThis.F4FSelectors = (() => {
         child.getAttribute('aria-label') || child.textContent)].map(normalize);
   }
   function profileControl(document) {
-    // Instagram's sidebar need not be a <nav>, and the Profile control need not
-    // contain an avatar. Use its explicit text/accessibility label, excluding posts.
     const labels = new Set(profileLabels.map(normalize));
     const candidates = [];
     for (const control of document.querySelectorAll('a[href], button, [role="button"], [role="link"]')) {
@@ -56,7 +54,6 @@ globalThis.F4FSelectors = (() => {
     const name = usernameFromHref(location.href);
     if (!name) return null;
     const labels = new Set(editProfileLabels.map(normalize));
-    // Edit profile is self-only evidence. Do not trust the visited pathname alone.
     const scope = document.querySelector('main, [role="main"]') || document;
     for (const control of scope.querySelectorAll('a[href], button, [role="button"], [role="link"]')) {
       if (!visible(control) || control.closest('article, [role="dialog"]')) continue;
@@ -66,7 +63,7 @@ globalThis.F4FSelectors = (() => {
           const url = new URL(href, location.origin);
           if (['www.instagram.com', 'instagram.com'].includes(url.hostname) &&
             url.pathname.replace(/\/+$/, '') === '/accounts/edit') return name;
-        } catch { /* Text-labelled buttons remain available below. */ }
+        } catch {}
       }
       if (labelsFor(control).some(label => labels.has(label))) return name;
     }
