@@ -33,7 +33,15 @@ current pathname, with slashes removed.
 The build embeds the entire original file as an unchanged byte sequence in
 `extension/checker-runner.js`. A lexical `document` proxy delegates to the real
 document and adds localized Close lookup **only when the original selector
-fails**. It does not replace global DOM APIs or change scroll/timer behavior.
+fails**. The separate `list-controls.js` interface adapter also extends the
+original top-level `querySelectorAll('a')` lookup when an exact list href is absent:
+it recognizes equivalent absolute/slashless hrefs or the visible labelled native
+button/span and exposes its canonical list href to `openList`. The wrapper's
+click remains bound to the actual Instagram element (label clicks bubble to the
+site's enclosing handler). It leaves exact original links first and unchanged.
+No HTML anchors are inserted and no global DOM APIs are replaced. Crucially,
+`dialog.querySelectorAll(...)`, scrolling, stability tests, sleeps, Set comparison
+and original output are untouched. This changes interface recognition only.
 The lexical alert adapter records the original error in the extension instead
 of opening a blocking alert. These are UI integrations, not algorithm changes.
 
@@ -46,3 +54,17 @@ verbatim runner checks and differential full-script fixtures guard integrity.
 The baseline's limitations (including possible incomplete DOM lists, no hard
 timeout for continuously changing lists, and case-sensitive comparisons) are
 preserved intentionally. Navigation/readiness timeouts are outside the checker.
+
+## Original timing audit
+
+`npm run test:timing` executes the original on anchors and the packaged adapter
+on native buttons concurrently in isolated browser fixtures, with actual timers
+and no clock acceleration. On the two-account lists used in that fixture, the
+latest measured executions were 49,186 ms and 49,085 ms respectively. Each used
+two 3,000 ms opening waits, five 2,000 ms setup/close/between-list waits and
+twenty-two 1,500 ms scrolling waits. Both lists reached stability 8/8; requested
+wait sequences, click order, collected output and stability logs matched exactly.
+Twenty-two scrolling passes is a fixture result, not a fixed production count.
+The original loop always waits for eight stable passes after its no-new-user
+condition, and can run longer as new accounts arrive. Its missing-dialog retry
+limit is still the exact original 30 attempts with a 500 ms wait per failed attempt.

@@ -1,5 +1,26 @@
 # Verification — 8 October 2026
 
+## Version 1.0.2 selector compatibility and real timing audit
+
+The next screenshot reported a readiness error even though profile counts were
+visible. The user provided an inner follower-count span and a nested `104 following`
+label span. They do not include the outer clickable element or href, so they do
+not establish the exact live parent markup. The previous readiness check accepted
+only `/${username}/${type}/` anchors; that extra extension gate could reject
+visible native controls before the original checker ever ran.
+
+The new, separate `list-controls.js` adapter preserves exact original links first,
+recognizes equivalent absolute/slashless links and visible labelled native
+buttons/role controls/spans, then supplies those controls to the original openList
+lookup. Clicks use the real DOM element and bubble through its native site handler.
+Opaque Instagram class names are not used as selectors. Dialog account collection,
+scrolling, retries, timing and comparison remain byte-for-byte original code.
+
+The supplied span shapes, native clickable ancestors, bare bubbling label handlers,
+equivalent URLs and rejection of post/other-account controls have passed fixtures.
+Authenticated live DOM behavior is still unverified; this is a compatibility fix
+for those supported shapes, not a claim that a screenshot proves the full DOM.
+
 ## Version 1.0.1 regression fix
 
 The supplied screenshot showed an authenticated own-profile page with Edit profile
@@ -30,13 +51,17 @@ the fix, so the previous page script and stalled session are replaced.
   referenced manifest assets, Manifest V3, exact restricted permissions, JavaScript
   syntax, absence of remote script/eval/Function/network clients and inline popup
   handlers. The original checksum is also confirmed in the committed Git blob.
-- `npm run test:browser`: **31 fixture checks passed** in headless Edge.
+- `npm run test:browser`: **38 fixture checks passed** in headless Edge.
   Six full-script differential runs compare original versus extension outputs,
   counts, account fields, ordering, click sequence and requested timer values for
   English and Turkish. Inputs exercise duplicates, list snapshots, reserved-name
   exclusions, query components, case sensitivity and empty lists. Test clocks
   accelerate execution; production timers are unchanged.
   Nine additional localized close-control fixtures pass. Error handling, automatic
+  list control recognition with absolute/slashless hrefs, buttons, role links,
+  supplied nested spans and native bubbling click handlers pass. Requested delays
+  are compared directly against the original's trace for each control shape.
+  Post controls and controls linking to another account are rejected. Automatic
   Profile-control clicks without nav/avatar assumptions, Edit profile detection
   in English/Turkish, slashless profile paths, manual navigation after the old
   15-second cutoff, icon/button-only Profile controls, login gating/resume and
@@ -47,6 +72,7 @@ the fix, so the previous page script and stalled session are replaced.
 - `npm run test:extension`: passed with the real unpacked MV3 extension in a
   temporary Edge profile, using actual Chrome-compatible APIs and isolated-world
   DOM execution. Reproduces an own page with Edit profile and no usable sidebar,
+  and follower/following buttons with nested spans rather than list anchors,
   then verifies active Instagram tab reuse, actual packaged-script
   injection, localized modal closure, execution after the popup closes, genuine
   completion, persisted popup reopening and View Results. A second run verifies
@@ -54,6 +80,13 @@ the fix, so the previous page script and stalled session are replaced.
   fixture's own profile, automatic execution and completion without pressing
   Start again. A local TLS server/host mapping covers initial browser-created
   navigations; external hosts are blocked. Test-only timers are accelerated.
+- `npm run test:timing`: passed using **real, unaccelerated browser timers**.
+  Original anchors versus adapted native buttons produced matching clicks, waits,
+  results and stability logs. Measured times: original **49,186 ms**, packaged
+  runner **49,085 ms**. In this two-account fixture each requested 2 × 3,000 ms,
+  5 × 2,000 ms and 22 × 1,500 ms; both lists reached 8/8 stability. Each measured
+  timer met its requested delay within a 20 ms timer-resolution tolerance. These
+  are observed fixture results, not a claim of fixed live account processing time.
 - Screenshots were generated and visually inspected for running status, profile
   navigation waiting, narrow results and the warning banner. No clipping/hidden recovery
   action was observed. Popup focus indicators and motion preferences are present.

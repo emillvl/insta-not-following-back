@@ -54,6 +54,7 @@ async function pageFor(data = native, label = 'Close', broken = false, path = '/
 }
 async function install(page) {
   await page.addScriptTag({ content: file('localization.js') });
+  await page.addScriptTag({ content: file('list-controls.js') });
   await page.addScriptTag({ content: file('content.js') });
 }
 async function snapshot(page) {
@@ -111,6 +112,55 @@ try {
     await page.close(); checks++;
   }
   console.log('PASS: nine additional localized close-control browser fixtures.');
+  const controlBaseline = await pageFor();
+  await controlBaseline.evaluate(source);
+  const originalControlTrace = await snapshot(controlBaseline);
+  await controlBaseline.close();
+  for (const kind of ['absolute', 'slashless', 'button', 'role-link', 'bare-span', 'split-label']) {
+    const page = await pageFor();
+    await page.evaluate(kind => {
+      for (const type of ['following', 'followers']) {
+        const old = document.querySelector(`[data-list="${type}"]`);
+        if (kind === 'absolute' || kind === 'slashless') {
+          old.setAttribute('href', `${kind === 'absolute' ? 'https://www.instagram.com' : ''}/me/${type}`);
+          continue;
+        }
+        const control = document.createElement(kind === 'button' ? 'button' : 'div');
+        if (kind === 'role-link') control.setAttribute('role', 'link');
+        // The following label reproduces the nested spans provided by the user;
+        // the follower count was provided alone, so include the visible label
+        // from the screenshot in its enclosing native control.
+        control.innerHTML = type === 'following' ?
+          '<span class="x1lliihq x1plvlek xryxfnj" dir="auto"><span class="x5n08af x1s688f"><span class="html-span xdj266r x14z9mp">104</span></span> following</span>' :
+          '<span class="html-span xdj266r x14z9mp xat24cr">108</span> followers';
+        if (kind === 'split-label') control.innerHTML = `<span>${type === 'following' ? '104' : '108'}</span> <span>${type}</span>`;
+        control.onclick = old.onclick;
+        old.replaceWith(control);
+      }
+    }, kind);
+    if (!['absolute', 'slashless'].includes(kind)) {
+      assert.equal(await page.locator('a[href*="/following"], a[href*="/followers"]').count(), 0);
+    }
+    await adapted(page);
+    const actual = await snapshot(page);
+    assert.deepEqual(actual.accounts.map(account => account.name), ['missing', 'later'], kind);
+    assert.deepEqual(actual.clicks, ['open:following', 'close:following', 'open:followers', 'close:followers'], kind);
+    assert.deepEqual(actual.timings.slice(0, originalControlTrace.timings.length), originalControlTrace.timings, kind);
+    await page.close(); checks++;
+  }
+  const unrelated = await pageFor();
+  await install(unrelated);
+  await unrelated.evaluate(() => {
+    document.querySelector('[data-list="following"]').remove();
+    const article = document.createElement('article');
+    article.innerHTML = '<button>104 following</button>';
+    document.querySelector('main').append(article);
+    const wrong = document.createElement('a'); wrong.href = '/other_user/following/'; wrong.textContent = '104 following';
+    document.querySelector('main').append(wrong);
+  });
+  assert.equal(await unrelated.evaluate(() => F4FListControls.find(document, 'me', 'following') === null), true);
+  await unrelated.close(); checks++;
+  console.log('PASS: absolute/slashless URLs, buttons, role links, supplied nested label spans, bubbling native handlers and rejection of post/other-account controls.');
   const failure = await pageFor(native, 'Close', true);
   await adapted(failure);
   assert.equal(await failure.evaluate(() => __messages.some(m => m.type === 'F4F_FINISHED')), false);

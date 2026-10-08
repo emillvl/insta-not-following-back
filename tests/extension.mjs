@@ -15,8 +15,8 @@ const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="sidebar"><a href="/me/"><span>Profile</span></a></div>
   <main><a id="edit" href="/accounts/edit/">Edit profile</a>
-  <a href="/me/following/" data-kind="following">Following</a>
-  <a href="/me/followers/" data-kind="followers">Followers</a>
+  <button data-kind="following"><span dir="auto"><span><span class="html-span">104</span></span> following</span></button>
+  <div role="button" data-kind="followers"><span class="html-span">108</span> followers</div>
   </main>
   <script>
   if(!['/me','/me/'].includes(location.pathname))document.getElementById('edit').remove();

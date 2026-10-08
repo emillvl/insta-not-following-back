@@ -26,7 +26,7 @@ result with count zero, not an error. Check Again runs the original checker
 again. Reloading/navigating away from the checking page or closing that tab
 reports interruption; the extension does not silently restart it.
 
-After updating the unpacked extension to **1.0.1**, click its Reload button on
+After updating the unpacked extension to **1.0.2**, click its Reload button on
 `chrome://extensions`, refresh the Instagram page, then select Start Checking.
 Refreshing replaces the previous content script and its stalled wait state.
 
@@ -40,11 +40,17 @@ Refreshing replaces the previous content script and its stalled wait state.
   Profile control, including plain sidebar links, accessible SVG icons and
   buttons, without requiring a semantic nav wrapper or avatar. On an own-profile
   page, the native Edit profile route or label provides independent ownership
-  evidence. It waits for the exact following and follower hrefs required by the
-  original, then requests a single run. The current pathname alone is never
+  evidence. It waits for the native following and follower controls recognized
+  by the separate list-selector adapter, then requests a single run. The current pathname alone is never
   ownership evidence. Login is gated and resumes after normal authentication.
   Readiness keeps polling through SPA/manual profile navigation, with a 60-second
   deadline; it no longer stops at 15 seconds. These waits are outside the checker.
+- `list-controls.js` keeps the exact original relative links first, accepts
+  equivalent absolute/slashless list hrefs and binds labelled buttons, role
+  controls or nested count spans to their actual native click target. Only the
+  original top-level list-opening selector receives this compatibility wrapper.
+  Account collection inside dialogs remains unchanged, with the original waits,
+  retries and eight-stable-pass stopping condition.
 - The worker claims the ready page, records **running**, then injects packaged
   `adapter.js` and `checker-runner.js` into Chrome's default **isolated content
   script world**. They operate on the real Instagram DOM and click its controls;
@@ -86,8 +92,9 @@ with `--ignore-space-at-eol` is empty. The committed original now has the exact
 supplied SHA-256 and will retain it on future checkouts.
 
 All production changes are in separate integration/presentation files. The
-lexical document adapter adds Close-label fallbacks only after the original
-selector fails. The lexical alert adapter routes the existing error to status
+lexical document adapter adds Close-label fallbacks and native list-control
+recognition when an original selector fails. Its wrappers retain native DOM
+clicks and do not modify account collection. The lexical alert adapter routes the existing error to status
 and the banner instead of a blocking alert. These are interface changes; the
 collection, comparison, filtering, categorization and timing remain unchanged.
 
@@ -134,6 +141,7 @@ package and installed Edge; they add no production dependencies:
 ```sh
 npm run test:browser
 npm run test:extension
+npm run test:timing
 ```
 
 If Playwright is bundled elsewhere, set `F4F_PLAYWRIGHT_PATH` to that package
@@ -143,6 +151,9 @@ defaults to Git for Windows' bundled OpenSSL). It creates a temporary profile
 and a temporary local TLS certificate, maps Instagram to a local fixture server
 and blocks other network hosts. It does not use your regular browser profile.
 Temporary integration profiles are left in the system temporary directory.
+The timing audit takes about 50 seconds on its fixed two-account fixture, uses
+actual browser timers, and compares the original anchor-clicking script against
+the adapted button-clicking script. It does not use your signed-in account.
 
 See [VERIFICATION.md](docs/VERIFICATION.md) for actual test results and the
 remaining authenticated-Chrome checklist. Visual snapshots are saved locally
@@ -179,6 +190,7 @@ Added extension files:
 - `extension/service-worker.js`
 - `extension/content.js`
 - `extension/localization.js`
+- `extension/list-controls.js`
 - `extension/adapter.js`
 - `extension/checker-runner.js` (generated, contains original bytes)
 - `extension/popup.html`
@@ -196,6 +208,7 @@ Added development/documentation files:
 - `tests/worker.test.mjs`
 - `tests/browser.mjs`
 - `tests/extension.mjs`
+- `tests/timing.mjs`
 - `docs/ALGORITHM.md`
 - `docs/DESIGN.md`
 - `docs/VERIFICATION.md`
