@@ -169,8 +169,8 @@
       const response = await send({ type: 'F4F_FINISHED', results: output(box), validation });
       running = false;
       if (response.status !== 'completed') {
-        if (validation) { box.remove(); resultBox = null; }
-        warning('error', response.message || response.error || 'Results could not be saved. The original list remains available.');
+        if (validation && response.reason !== 'storage_error') { box.remove(); resultBox = null; }
+        warning('error', response.message || response.error || 'Results could not be saved. Please retry checking.');
         return;
       }
       warning('success', 'Your results are ready. Open F4F Checker to view them again.');

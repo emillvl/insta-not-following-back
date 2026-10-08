@@ -170,7 +170,7 @@ async function handle(message, sender) {
       return await save({ ...operation, status: 'completed', message: 'Checking Complete',
         finishedAt: Date.now(), results, validation });
     } catch {
-      return fail(operation, 'The results exceed session storage capacity. The original list is still on Instagram.');
+      return fail(operation, 'The results exceed session storage capacity. The verified list is still on Instagram.', 'storage_error');
     }
   }
   if (message.type === 'F4F_FAILED') return fail(operation, message.message || 'Checking failed.', message.reason);
