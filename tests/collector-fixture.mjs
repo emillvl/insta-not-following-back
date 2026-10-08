@@ -11,28 +11,37 @@ export function collectorFixture(options = {}) {
     followers.slice(0,Math.min(99,size));
   const following=size===0?[]:[...mutual,'missing'];
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
+  window.__actions=[];window.__waits=[];
+  const nativeTimeout=window.setTimeout;
+  window.setTimeout=(fn,ms,...args)=>{__waits.push(ms);return nativeTimeout(fn,ms,...args)};
   window.alert=text=>__alerts.push(text);
   const controls=[...document.querySelectorAll('[data-list]')];
   for(const control of controls){
     const type=control.dataset.list,names=type==='following'?following:followers;
     control.textContent=(type==='followers'&&options.rounded?'1K':names.length)+' '+type;
-    if(type==='followers'&&options.smallerTotal)control.textContent=(names.length-1)+' '+type;
+    if(type==='followers'&&options.smallerTotal)control.textContent=(names.length-(typeof options.smallerTotal==='number'?options.smallerTotal:1))+' '+type;
     if(type==='followers'&&options.exactTitle)control.title=String(names.length);
     control.onclick=event=>{
-      event.preventDefault();__clicks.push('open:'+type);
+      event.preventDefault();__clicks.push('open:'+type);__actions.push({type:'open',list:type,at:Date.now()});
       let dialog=document.createElement('div');dialog.setAttribute('role','dialog');
       let host=document.body;
       if(options.replaceWrapper){host=document.createElement('section');document.body.append(host);}
       window.__listOpenedAt=Date.now();
       const close=document.createElement('button');close.setAttribute('aria-label','Close');
-      close.onclick=()=>{__clicks.push('close:'+type);dialog.remove();
+      close.onclick=()=>{__clicks.push('close:'+type);__actions.push({type:'close',list:type,at:Date.now()});dialog.remove();
         if(type==='followers'&&options.changedCount)control.textContent=(names.length+1)+' followers';};
       let list=document.createElement('div');list.className='scroller';
       list.style.cssText='position:relative;height:'+(options.viewport??320)+'px;overflow-y:auto';
       const makeRow=name=>{const row=document.createElement('a');row.setAttribute('role','link');
         row.href='/'+name+'/';row.textContent=name;row.style.cssText='display:block;height:20px';return row;};
       const append=(node,values)=>{for(const name of values)node.append(makeRow(name));};
-      if(type==='following'||mode==='all'){append(list,names);}
+      if(type==='following'||mode==='all'){
+        append(list,names);
+        const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+        Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
+          __scrolls++;__actions.push({type:'scroll',list:type,at:Date.now()});scrollProperty.set.call(this,value);
+        }});
+      }
       else if(mode==='virtual'||mode==='recycled'){
         const spacer=document.createElement('div');spacer.style.height=(names.length*20)+'px';
         const windowBox=document.createElement('div');windowBox.style.cssText='position:absolute;top:0;left:0';
@@ -49,6 +58,7 @@ export function collectorFixture(options = {}) {
         let pending=false;
         Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
           scrollProperty.set.call(this,value);__scrolls++;
+          __actions.push({type:'scroll',list:type,at:Date.now()});
           if(options.replaceAtScroll===__scrolls)replaceDialog();
           if(options.renderDelay){if(!pending){pending=true;setTimeout(()=>{render();pending=false},options.renderDelay)}}
           else render();
@@ -58,6 +68,7 @@ export function collectorFixture(options = {}) {
         append(list,names.slice(0,loaded));
         const onScroll=()=>{
           __scrolls++;
+          __actions.push({type:'scroll',list:type,at:Date.now()});
           if(options.jumpClock){const original=Date.now;Date.now=()=>original()+21*60*1000;}
           if(busy||loaded>=names.length||list.scrollTop+list.clientHeight<list.scrollHeight-2)return;
           busy=true;const spinner=document.createElement('div');spinner.setAttribute('role','progressbar');
@@ -95,7 +106,7 @@ export function collectorFixture(options = {}) {
         spinner.style.height='8px';placeholder.append(spinner);host.append(placeholder);
         setTimeout(()=>{placeholder.remove();setTimeout(()=>host.append(dialog),options.replacementGap??0)},100);
       }else host.append(dialog);
-      if(options.replaceDialog&&type==='followers')for(let i=0;i<(options.replaceTimes??1);i++)setTimeout(replaceDialog,100+i*400);
+      if(options.replaceDialog&&type==='followers')for(let i=0;i<(options.replaceTimes??1);i++)setTimeout(replaceDialog,(options.replaceAfter??100)+i*(options.replacementInterval??400));
       if(options.closeDuringLoad&&type==='followers')setTimeout(()=>dialog.remove(),500);
     };
   }

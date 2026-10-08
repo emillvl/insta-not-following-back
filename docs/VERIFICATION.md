@@ -1,5 +1,47 @@
 # Verification — 8 October 2026
 
+## Version 1.0.6 baseline pacing and retained deactivated accounts
+
+The user requested stability over faster scanning and identified the extra
+collected rows as deactivated accounts. Row extraction, exclusions, Set order
+and comparison remain unchanged. Settled totals above the profile's displayed
+count are now accepted rather than rejected or trimmed. The worker requires
+both verified and settled evidence and still rejects totals below the displayed
+count or malformed evidence. Profile counts are checked again before completion.
+
+The collector restores 3,000 ms after opening, 2,000 ms before collection,
+1,500 ms per scroll pass and 2,000 ms after closing. The original between-list
+2,000 ms wait is unchanged. The original eight stable-height passes after three
+no-new-account passes are restored. Reaching a displayed count does not finish
+the scan early. Row mutations cannot shorten delays, and the back-and-forth
+scroll nudges are removed. Incomplete settled lists receive extra quiet waits
+of 3, 6 and 10 seconds, with the 20-minute deadline and dialog recovery retained.
+Disconnection is checked after the paced waits, so interruptions remain bounded
+without causing a faster subsequent scroll.
+
+**21 unit tests** and packaged static checks pass. The **25 collector scenarios**
+pass at the restored cadence, including 1,000/2,000/10,000 cumulative accounts,
+10,000 virtual rows, recycled anchors, delayed rendering/loading and dialog
+replacement. Action traces assert at least five seconds from opening to first
+scroll, at least 1.5 seconds between scroll writes and at least four seconds
+between the first close and opening the next list. The 110-row/108-displayed
+regression retains all 110 rows and completes after settling.
+
+The real unpacked MV3 extension passes normal checking/navigation/themes and
+completes with four rows in each list while each profile control displays two.
+Its saved original summary retains the actual four/four totals. A genuinely
+incomplete list still produces the retryable error without publishing results.
+
+Unaccelerated production/reference timing passed with identical wait sequences:
+two 3,000 ms waits, five 2,000 ms waits and twenty-two 1,500 ms waits. Measured
+times were **49,123 ms original** and **49,130 ms current collector**, with
+identical accounts and summary. The prior approximately ten-second large-list
+benchmark describes versions 1.0.4/1.0.5 and is not a current-speed claim.
+These are local fixtures; the screenshot does not establish an anti-bot block,
+and no authenticated live Instagram scan was performed.
+
+Reload the extension and refresh Instagram before using **1.0.6**.
+
 ## Version 1.0.5 dialog replacement recovery
 
 The reported immediate "list was closed" error was reproduced by replacing

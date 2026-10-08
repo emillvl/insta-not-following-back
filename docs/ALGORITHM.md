@@ -11,7 +11,8 @@ current pathname, with slashes removed.
 
 This section describes the standalone source and reference `checker-runner.js`.
 The current extension uses `safe-runner.js` with the explicitly requested
-collection safeguards below; its scrolling and timing are intentionally changed.
+collection safeguards below. Version 1.0.6 restores baseline delays and settling
+while retaining scrolling that avoids skipping unseen virtual rows.
 
 - `openList(type)` finds an anchor whose href equals `/${username}/${type}/`,
   clicks it, then waits 3,000 ms.
@@ -59,7 +60,7 @@ The baseline's limitations (including possible incomplete DOM lists, no hard
 timeout for continuously changing lists, and case-sensitive comparisons) are
 preserved intentionally. Navigation/readiness timeouts are outside the checker.
 
-## Validated collection used by version 1.0.4
+## Validated collection and baseline pacing used by version 1.0.6
 
 The user's subsequent request explicitly authorized completion validation,
 safer collection and adaptive waits/bounded retries. These collection changes
@@ -84,25 +85,40 @@ full-list query is repeated on each scroll. Replaced scroll containers are
 recognized and scanned once. Already captured mounted rows can be crossed in
 one step; virtual windows retain viewport overlap.
 
-Healthy traversal uses a 200 ms cadence. Stalled loading/rendering gets waits
-of 1.5, 3, 6 and 10 seconds, woken early by new accounts or loading progress.
-Actual new accounts reset the retry budget. Four quiet waits fail the list;
-each list also has a 20-minute deadline even if content keeps changing.
-Dialog opening is bounded at 15 seconds and closing at 2.5 seconds. Empty lists
-skip opening; short non-scrolling lists are accepted when counts match.
+Every nonempty list uses the original 3,000 ms opening wait, 2,000 ms setup,
+1,500 ms per scroll pass and 2,000 ms closing wait. The source's between-list
+2,000 ms pause remains unchanged. Row mutations never shorten these waits.
+The original settling condition is restored: eight stable-height passes with
+at least three consecutive no-new-account passes. Completion also requires
+reaching the end of the scroll area and no visible loading indicator.
+Back-and-forth scroll nudges are removed. Incomplete settled lists get extra
+quiet waits of 3, 6 and 10 seconds; new accounts reset this bounded retry budget.
+Each list has a 20-minute deadline even if content keeps changing. Dialog
+discovery and closure are separately bounded. Empty lists skip opening; short
+non-scrolling lists still undergo the original settling checks.
 
-Both collected totals must match the exact initial counts, and the profile
-totals are read again before publication. The adapter and worker require
-verified evidence before completion. A collection/validation failure publishes no non-followers and
+Both collected totals must be at least the exact initial displayed counts;
+deactivated rows can legitimately exceed those counts and are kept unchanged.
+Profile totals are read again before publication. The adapter and worker require
+verified and settled evidence before completion; an overshoot by itself never
+finishes collection. A collection/validation failure publishes no non-followers and
 removes a prematurely generated result box. Owned observers/dialogs are cleaned
 up. Counts are a consistency check, not an atomic snapshot guarantee: list
 membership can change without changing totals during sequential collection.
 
-On the healthy 10,000-follower cumulative fixture, actual unshortened timers
-measured 106,383 ms for the reference and 9,958 ms for validated collection.
+Version 1.0.4's healthy 10,000-follower cumulative fixture with its accelerated
+interaction cadence measured 106,383 ms for the reference and 9,958 ms for
+validated collection using actual browser timers. That faster cadence was
+removed in version 1.0.6 at the user's request.
 Full totals and result accounts matched, including followed accounts appearing
 in the first, middle and final follower batches. This is fixture evidence;
 Instagram's live loading delays and DOM behavior still determine actual times.
+
+The current small healthy fixture's unshortened timer trace exactly matches
+the original: two 3,000 ms waits, five 2,000 ms waits and twenty-two 1,500 ms
+waits. The original took 49,123 ms and the current collector 49,130 ms, with
+identical accounts and summary. This confirms baseline pacing on the fixture,
+not live Instagram compatibility or the cause of any account restriction.
 
 ## Original reference timing audit
 

@@ -20,7 +20,7 @@ async function run(options, baseline = false, real = false) {
     }
   }
   if (!real) {
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0; i < 2000; i++) {
       if (await page.evaluate(() => Boolean(window.__done || window.__failed || __alerts.length))) break;
       await page.clock.runFor(1000);
     }
@@ -31,7 +31,8 @@ async function run(options, baseline = false, real = false) {
     originalSummary: document.getElementById('closeF4FBox')?.parentElement.querySelector('div').textContent.trim(),
     resultsPresent: Boolean(document.getElementById('closeF4FBox')),
     dialogsRemaining: document.querySelectorAll('div[role="dialog"]').length,
-    listElapsedMs: Date.now() - window.__listOpenedAt }));
+    listElapsedMs: Date.now() - window.__listOpenedAt,
+    actions: __actions, waits: __waits }));
   result.wallMs = Date.now() - started;
   await page.close();
   return result;
@@ -55,15 +56,30 @@ try {
     { name: 'virtual dialog replacement midway through collection', size: 1000, mode: 'virtual', replaceAtScroll: 20, replacementGap: 1200 },
     { name: 'non-scrolling small lists', size: 2, mode: 'all' },
     { name: 'both lists empty', size: 0, mode: 'all' },
-    { name: 'rounded label with exact title', size: 1000, rounded: true, exactTitle: true }
+    { name: 'rounded label with exact title', size: 1000, rounded: true, exactTitle: true },
+    { name: 'deactivated accounts retained: 110 rows with 108 displayed', size: 110, smallerTotal: 2 }
   ].filter(options => !regressionOnly || options.name.includes('dialog'))) {
     const result = await run(options);
     assert.equal(result.failed, undefined, `${options.name}: ${JSON.stringify(result)}`);
     assert.ok(result.done, `${options.name}: no completion`);
     assert.deepEqual(result.done.accounts, options.size === 0 ? [] : ['missing'], options.name);
-    assert.deepEqual(result.done.validation.followers, { expected: options.size, collected: options.size });
+    assert.deepEqual(result.done.validation.followers, { expected: options.size - (options.smallerTotal || 0), collected: options.size });
     assert.equal(result.done.validation.verified, true);
+    assert.equal(result.done.validation.settled, true);
     assert.equal(result.dialogsRemaining, 0, `${options.name}: list left open`);
+    for (const list of ['following', 'followers']) {
+      const actions = result.actions.filter(action => action.list === list);
+      const scrolls = actions.filter(action => action.type === 'scroll');
+      if (!scrolls.length) continue;
+      assert.ok(scrolls[0].at - actions[0].at >= 5000, `${options.name}: initial wait was shortened`);
+      for (let i = 1; i < scrolls.length; i++) assert.ok(scrolls[i].at - scrolls[i - 1].at >= 1500,
+        `${options.name}: scroll cadence was shortened`);
+      assert.ok(actions.at(-1).at - scrolls.at(-1).at >= 1500, `${options.name}: final scroll wait was shortened`);
+    }
+    const followingClose = result.actions.find(action => action.type === 'close' && action.list === 'following');
+    const followersOpen = result.actions.find(action => action.type === 'open' && action.list === 'followers');
+    if (followingClose && followersOpen) assert.ok(followersOpen.at - followingClose.at >= 4000,
+      `${options.name}: close/between-list delays were shortened`);
     records.push({ name: options.name, status: 'verified', scrolls: result.scrolls, wallMs: result.wallMs });
     console.log('PASS:', options.name);
   }
@@ -71,17 +87,16 @@ try {
     { name: 'stalled list', size: 1000, mode: 'stall', reason: 'incomplete_scan' },
     { name: 'unverifiable rounded total', size: 1000, rounded: true, reason: 'unverified_count' },
     { name: 'profile changes during scan', size: 1000, changedCount: true, reason: 'incomplete_scan' },
-    { name: 'more rows than advertised', size: 1000, smallerTotal: true, reason: 'incomplete_scan' },
     { name: 'list closes during loading', size: 1000, delay: 18000, closeDuringLoad: true, reason: 'interrupted' },
-    { name: 'dialog does not return within recovery limit', size: 1000, replaceDialog: true, replacementGap: 4000, reason: 'interrupted' },
-    { name: 'repeated dialog replacements without progress', size: 1000, mode: 'stall', replaceDialog: true, replaceTimes: 6, reason: 'interrupted' },
+    { name: 'dialog does not return within recovery limit', size: 1000, replaceDialog: true, replaceAfter: 6000, replacementGap: 4000, reason: 'interrupted' },
+    { name: 'repeated dialog replacements without progress', size: 1000, mode: 'stall', replaceDialog: true, replaceAfter: 6000, replacementInterval: 1800, replaceTimes: 6, reason: 'interrupted' },
     { name: 'hard deadline', size: 1000, jumpClock: true, reason: 'incomplete_scan' }
   ]) {
     const result = await run(options);
     assert.equal(result.done, undefined, `${options.name}: published incomplete results`);
     assert.equal(result.failed?.reason, options.reason, `${options.name}: ${JSON.stringify(result)}`);
     assert.equal(result.resultsPresent, false);
-    if (options.replaceDialog || options.closeDuringLoad) assert.ok(result.listElapsedMs <= 5000, `${options.name}: interruption was not bounded`);
+    if (options.replaceDialog || options.closeDuringLoad) assert.ok(result.listElapsedMs <= 20000, `${options.name}: interruption was not bounded`);
     records.push({ name: options.name, status: options.reason, scrolls: result.scrolls, wallMs: result.wallMs });
     console.log('PASS:', options.name, '→ no false results');
   }
@@ -92,7 +107,10 @@ try {
     assert.deepEqual(original.originalAccounts, ['missing']);
     assert.deepEqual(safer.done.accounts, ['missing']);
     assert.equal(original.originalSummary, safer.done.summary);
-    assert.ok(safer.wallMs < original.wallMs, 'healthy validated collection must beat original fixture time');
+    if (process.argv.includes('--real-timing')) {
+      assert.deepEqual(safer.waits, original.waits, 'baseline healthy timer sequence must be restored exactly');
+      assert.ok(safer.wallMs >= 48900, 'baseline healthy run must not finish early');
+    }
     records.push({ name: `unshortened healthy timing (${options.size} followers)`, originalMs: original.wallMs, validatedMs: safer.wallMs });
     console.log(`PASS: real timers; original ${original.wallMs}ms, validated ${safer.wallMs}ms; identical accounts.`);
   }

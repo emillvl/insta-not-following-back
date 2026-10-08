@@ -25,6 +25,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     const close=document.createElement('button');close.setAttribute('aria-label','Fermer');close.onclick=()=>dialog.remove();
     const scroll=document.createElement('div');scroll.style.cssText='height:100px;overflow-y:auto';
     const names=link.dataset.kind==='following'?['mutual','missing']:['mutual','fan'];
+    if(window.__includeDeactivated)names.push('deactivated_one','deactivated_two');
     for(const name of names){const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;scroll.append(row)}
     dialog.append(close,scroll);
     if(link.dataset.kind==='followers'){
@@ -160,9 +161,28 @@ try {
   assert.equal(operation.status, 'completed');
   assert.equal((await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.instagram.com/*' }))).length, 1);
   console.log('PASS: no existing Instagram tab → one foreground tab → own profile → automatic checking and completion with no second Start.');
-  // A native list exposing fewer rows than its count must never publish a result.
   const createdPage = context.pages().find(page => page.url() === 'https://www.instagram.com/me/');
-  await createdPage.evaluate(() => { document.querySelector('[data-kind="following"]').textContent = '3 following'; });
+  await createdPage.evaluate(() => { window.__includeDeactivated = true; });
+  await worker.evaluate(() => chrome.storage.session.clear());
+  const extraPopup = await context.newPage();
+  await extraPopup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await extraPopup.locator('#start').click();
+  const extraDeadline = Date.now() + 15000;
+  while (Date.now() < extraDeadline) {
+    operation = await worker.evaluate(async () => (await chrome.storage.session.get('operation')).operation);
+    if (operation?.status === 'completed') break;
+    if (operation?.status === 'error') throw new Error(operation.message);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(operation.status, 'completed');
+  assert.equal(operation.validation.settled, true);
+  assert.deepEqual(operation.validation.followers, { expected: 2, collected: 4 });
+  assert.deepEqual(operation.validation.following, { expected: 2, collected: 4 });
+  assert.deepEqual(operation.results.accounts, [{ name: 'missing', href: '/missing' }]);
+  assert.match(operation.results.summary, /Takip Ettiğin: 4 \| Takipçi: 4/);
+  console.log('PASS: real MV3 completion retains deactivated rows above displayed counts after settling.');
+  // A native list exposing fewer rows than its count must never publish a result.
+  await createdPage.evaluate(() => { window.__includeDeactivated = false; document.querySelector('[data-kind="following"]').textContent = '3 following'; });
   await worker.evaluate(() => chrome.storage.session.clear());
   const incompletePopup = await context.newPage();
   await incompletePopup.goto(`chrome-extension://${extensionId}/popup.html`);

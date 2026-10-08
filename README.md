@@ -3,8 +3,9 @@
 A Manifest V3 extension around the supplied F4F Checker browser script. The
 original checking file remains **byte-for-byte unchanged**. No server, API
 scraper, remote executable code, analytics or runtime dependencies are used.
-Version 1.0.5 uses the requested safer DOM collector with completion validation;
-the original Set comparison and result construction are retained verbatim.
+Version 1.0.6 restores the original interaction delays and settling checks while
+keeping safer collection and completion validation. The original Set comparison
+and result construction are retained verbatim.
 
 ## Load and use
 
@@ -34,7 +35,7 @@ keeps the current white theme; **Dark** uses Instagram-style dark surfaces.
 The choice applies to the popup, results and status banner. It is saved locally
 across browser sessions and extension updates, separately from checking results.
 
-After updating the unpacked extension to **1.0.5**, click its Reload button on
+After updating the unpacked extension to **1.0.6**, click its Reload button on
 `chrome://extensions`, refresh the Instagram page, then select Start Checking.
 Refreshing replaces the previous content script and its stalled wait state.
 
@@ -42,27 +43,37 @@ Refreshing replaces the previous content script and its stalled wait state.
 
 The checker captures rows before scrolling and observes new, removed and recycled
 rows as Instagram renders them. It moves only through already captured rows,
-waiting for further rendering before advancing into an unseen section. Normal
-scroll steps use a 200 ms cadence; loading responses can wake an adaptive wait
-immediately. When progress stalls, four bounded waits of 1.5, 3, 6 and 10 seconds
-allow recovery. Each list also has a 20-minute hard deadline. Dialog opening and
-closing have separate 15-second and 2.5-second limits.
+waiting for further rendering before advancing into an unseen section. The
+original pacing is restored: three seconds after opening a list, two seconds
+before collection, 1.5 seconds per scroll pass, two seconds after closing, and
+the existing two-second pause between lists. Arriving rows never shorten these
+delays. Scans wait for the original eight stable-height passes after three
+consecutive passes with no new accounts, including when the displayed count
+has already been reached. Back-and-forth scroll nudges are removed.
+
+Loading that remains incomplete after settling gets additional quiet waits of
+3, 6 and 10 seconds. New accounts reset the retry budget. Each list has a
+20-minute hard deadline; dialog discovery and closure remain separately bounded.
 
 When Instagram replaces a dialog or its wrapper while rendering, collection
 keeps the accounts already captured and reattaches to the replacement. A missing
-dialog gets up to three seconds to return; four consecutive replacements without
-new accounts are allowed. Normal connected dialogs incur no recovery wait.
+dialog gets up to three seconds to return at the next paced check; four
+consecutive observed replacements without new accounts are allowed.
 An actual closure, repeated replacements without progress, navigation or the
 list deadline still stop checking without publishing an incomplete result.
 
-Completion requires collected following/follower totals to equal exact profile
-counts, with the profile totals checked again at the end. Rounded labels such as
+Completion requires the full settling checks and collected following/follower
+totals at least as large as the exact displayed counts, with profile totals
+checked again at the end. Displayed totals can omit deactivated accounts; those
+accounts stay in the collection, and exceeding the displayed total is accepted
+after settling. Rounded labels such as
 `10K` are never treated as exact; an exact title/accessibility value can supply
 the real number. Missing exact counts, changed totals, stalls, closed lists and
 deadline failures produce a retryable error without publishing non-followers.
 Real collected counts appear in the popup while checking, without invented
-percentages. Matching totals are a consistency check, not proof of an atomic
-snapshot: memberships can still change while the two lists are read.
+percentages. Counts and settling are consistency checks, not proof of an atomic
+snapshot: memberships can still change while the two lists are read, and
+displayed counts alone cannot prove that all deactivated accounts were exposed.
 
 ## Architecture and navigation
 
@@ -83,11 +94,11 @@ snapshot: memberships can still change while the two lists are read.
   equivalent absolute/slashless list hrefs and binds labelled buttons, role
   controls or nested count spans to their actual native click target. It also
   recognizes exact localized integer counts, rejecting rounded/ambiguous totals.
-- `collector.js` owns safer scrolling, mutation-based collection, adaptive waits,
-  bounded retries and count verification. A row observer and an observer of
-  direct children of the dialog's ancestors detect rendering and replacement;
-  the latter does not observe the whole page subtree. One outstanding wait serves
-  each list. It caches the last mounted row to avoid repeated full-list
+- `collector.js` owns safer scrolling, mutation-based collection, baseline pacing,
+  settling, bounded retries and count validation. One row observer and one
+  outstanding wait serve each list. Dialog replacements are checked after the
+  paced waits; row arrivals never wake them early. It caches the last mounted
+  row to avoid repeated full-list
   queries while scrolling. Progress updates are limited to once per second,
   apart from list boundaries. Observers are disconnected and owned dialogs are
   closed on completion or failure.
@@ -143,6 +154,9 @@ preserved all original scrolling and timing; the reference runner still does.
 The current collector preserves username extraction, case sensitivity, the two
 original reserved-name exclusions and Set insertion order. Comparison, category
 and result fields are unchanged. Native DOM controls are still used throughout.
+Version 1.0.6 restores the original interaction delays and settling checks. It
+also accepts settled list totals above displayed counts so deactivated accounts
+are retained; their extraction and comparison remain unchanged.
 
 ## Language recognition and design
 
