@@ -1,3 +1,4 @@
 * text=auto
 f4fchecker.js -text
 extension/checker-runner.js -text
+extension/safe-runner.js -text

@@ -1,6 +1,6 @@
 {
   "name": "f4f-checker-extension",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -8,6 +8,7 @@
     "check": "node scripts/check.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:extension": "node tests/extension.mjs",
-    "test:timing": "node tests/timing.mjs"
+    "test:timing": "node tests/timing.mjs",
+    "test:collector": "node tests/collector-browser.mjs"
   }
 }

@@ -1,5 +1,5 @@
 globalThis.F4FAdapter = {
-  async run(checker) {
+  async run(checker, collector) {
     const bridge = globalThis.F4FBridge;
     if (!bridge?.claimed || !bridge.running || this.executing) return;
     this.executing = true;
@@ -14,15 +14,20 @@ globalThis.F4FAdapter = {
       }
     });
     try {
-      await checker({ document: adaptedDocument, alert: message => { originalError = new Error(message); } });
+      if (collector) await collector.prepare(() => bridge.running);
+      await checker({ document: adaptedDocument, alert: message => {
+        originalError = new Error(message); originalError.reason = collector?.failureReason;
+      } });
       if (originalError) throw originalError;
       const close = document.getElementById('closeF4FBox');
       if (!close?.parentElement || !close.parentElement.querySelector('ul')) {
         throw new Error('The original checker finished without its results window.');
       }
       if (!bridge.running) return;
-      await bridge.finish(close.parentElement);
-    } catch (error) { await bridge.fail(error); }
-    finally { this.executing = false; }
+      await bridge.finish(close.parentElement, collector?.validation());
+    } catch (error) {
+      if (collector) document.getElementById('closeF4FBox')?.parentElement?.remove();
+      await bridge.fail(error);
+    } finally { collector?.dispose(); this.executing = false; }
   }
 };

@@ -142,11 +142,23 @@ async function handle(message, sender) {
       message: 'Checking following, then followers…' });
     try {
       await chrome.scripting.executeScript({ target: { tabId: operation.tabId },
-        files: ['adapter.js', 'checker-runner.js'] });
+        files: ['collector.js', 'adapter.js', 'safe-runner.js'] });
     } catch (error) { return fail(running, error.message, 'injection_error'); }
     return running;
   }
+  if (message.type === 'F4F_PROGRESS' && operation.status === 'running') {
+    if (!['following', 'followers'].includes(message.list) ||
+      !Number.isSafeInteger(message.collected) || message.collected < 0 ||
+      !Number.isSafeInteger(message.expected) || message.expected < message.collected) return { ignored: true };
+    return save({ ...operation, message: `Collecting ${message.list}: ${message.collected} of ${message.expected} accounts…` });
+  }
   if (message.type === 'F4F_FINISHED' && operation.status === 'running') {
+    const validation = message.validation;
+    if (validation?.verified !== true || !['following', 'followers'].every(type =>
+      Number.isSafeInteger(validation[type]?.expected) && validation[type].expected >= 0 &&
+      validation[type].collected === validation[type].expected)) {
+      return fail(operation, 'The scan could not be verified as complete. Retry checking; no non-followers were confirmed.', 'incomplete_scan');
+    }
     const results = message.results;
     if (!results || typeof results.heading !== 'string' || typeof results.summary !== 'string' ||
       !Array.isArray(results.accounts) || !results.accounts.every(account =>
@@ -156,7 +168,7 @@ async function handle(message, sender) {
     }
     try {
       return await save({ ...operation, status: 'completed', message: 'Checking Complete',
-        finishedAt: Date.now(), results });
+        finishedAt: Date.now(), results, validation });
     } catch {
       return fail(operation, 'The results exceed session storage capacity. The original list is still on Instagram.');
     }

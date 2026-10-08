@@ -1,4 +1,4 @@
-/* Profile-control compatibility only. Never reads or changes collected account lists. */
+/* Profile controls and exact count recognition. No account comparison occurs here. */
 globalThis.F4FListControls = (() => {
   const labels = {
     followers: ['followers', 'follower', 'takipçi', 'seguidores', 'abonnés', 'abonné',
@@ -8,6 +8,33 @@ globalThis.F4FListControls = (() => {
   };
   const normalize = text => String(text || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
   const count = '[\\p{N}.,\\s]+(?:[kmb]|万|億)?';
+  function parseExactCount(value) {
+    const text = String(value || '').normalize('NFKC')
+      .replace(/[\u200e\u200f\u061c]/g, '').replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 0x660))
+      .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 0x6f0))
+      .replace(/٬/g, ',').trim().replace(/\s+/g, ' ');
+    if (!/^\d+$/.test(text) && !/^\d{1,3}([., ])\d{3}(?:\1\d{3})*$/.test(text)) return null;
+    const number = Number(text.replace(/[., ]/g, ''));
+    return Number.isSafeInteger(number) && number >= 0 ? number : null;
+  }
+  function expectedCount(document, username, type) {
+    const control = find(document, username, type);
+    if (!control) return null;
+    const numbers = new Set();
+    for (const node of [control, ...control.querySelectorAll('span, [title], [aria-label]')]) {
+      for (const value of [node.getAttribute('title'), node.getAttribute('aria-label'), node.textContent]) {
+        if (!value) continue;
+        let text = normalize(value);
+        for (const label of labels[type]) {
+          if (text.endsWith(label)) { text = text.slice(0, -label.length).trim(); break; }
+          if (text.startsWith(label)) { text = text.slice(label.length).trim(); break; }
+        }
+        const number = parseExactCount(text);
+        if (number !== null) numbers.add(number);
+      }
+    }
+    return numbers.size === 1 ? [...numbers][0] : null;
+  }
   function matchesLabel(text, type) {
     const normalized = normalize(text);
     return labels[type].some(label => normalized === label ||
@@ -67,5 +94,5 @@ globalThis.F4FListControls = (() => {
     }
     return links;
   }
-  return { find, forOriginal };
+  return { find, forOriginal, parseExactCount, expectedCount };
 })();

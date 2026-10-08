@@ -23,10 +23,11 @@ function render(next) {
   el('indicator').className = `indicator ${active ? 'running' : status}`;
   el('symbol').textContent = status === 'completed' ? '✓' : status === 'error' ? '!' : active ? '•••' : '↗';
   el('title').textContent = status === 'waiting' && next.reason === 'login_required' ?
-    'Login required' : titles[status] || titles.idle;
+    'Login required' : status === 'error' && ['incomplete_scan', 'unverified_count'].includes(next.reason) ?
+    'Incomplete scan' : titles[status] || titles.idle;
   el('message').textContent = status === 'idle' ? 'See which accounts you follow don’t follow you back.' : next.message;
   el('reminder').textContent = active ? 'Please keep the Instagram tab open and active. Switching tabs may interrupt or delay checking.' :
-    status === 'completed' ? 'Your original results are ready on Instagram.' :
+    status === 'completed' ? 'Your results are ready on Instagram.' :
     'Instagram will open in an active tab. Keep it active while checking.';
   el('start').hidden = status !== 'idle' && status !== 'error';
   el('start').textContent = status === 'error' ? 'Retry Checking' : 'Start Checking →';

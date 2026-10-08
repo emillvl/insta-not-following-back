@@ -161,11 +161,15 @@
     get running() { return running; },
     get claimed() { return claimed; },
     warning, decorate, output,
-    async finish(box) {
+    async progress(list, collected, expected) {
+      await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => {});
+    },
+    async finish(box, validation) {
       decorate(box);
-      const response = await send({ type: 'F4F_FINISHED', results: output(box) });
+      const response = await send({ type: 'F4F_FINISHED', results: output(box), validation });
       running = false;
       if (response.status !== 'completed') {
+        if (validation) { box.remove(); resultBox = null; }
         warning('error', response.message || response.error || 'Results could not be saved. The original list remains available.');
         return;
       }
@@ -174,7 +178,7 @@
     async fail(error) {
       running = false;
       warning('error', error.message);
-      await send({ type: 'F4F_FAILED', message: error.message }).catch(() => {});
+      await send({ type: 'F4F_FAILED', message: error.message, reason: error.reason }).catch(() => {});
     }
   };
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
