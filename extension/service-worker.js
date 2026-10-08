@@ -149,14 +149,17 @@ async function handle(message, sender) {
   if (message.type === 'F4F_PROGRESS' && operation.status === 'running') {
     if (!['following', 'followers'].includes(message.list) ||
       !Number.isSafeInteger(message.collected) || message.collected < 0 ||
-      !Number.isSafeInteger(message.expected) || message.expected < message.collected) return { ignored: true };
-    return save({ ...operation, message: `Collecting ${message.list}: ${message.collected} of ${message.expected} accounts…` });
+      !Number.isSafeInteger(message.expected) || message.expected < 0) return { ignored: true };
+    const progress = message.collected > message.expected ?
+      `Collecting ${message.list}: ${message.collected} accounts (profile shows ${message.expected})…` :
+      `Collecting ${message.list}: ${message.collected} of ${message.expected} accounts…`;
+    return save({ ...operation, message: progress });
   }
   if (message.type === 'F4F_FINISHED' && operation.status === 'running') {
     const validation = message.validation;
-    if (validation?.verified !== true || !['following', 'followers'].every(type =>
+    if (validation?.verified !== true || validation.settled !== true || !['following', 'followers'].every(type =>
       Number.isSafeInteger(validation[type]?.expected) && validation[type].expected >= 0 &&
-      validation[type].collected === validation[type].expected)) {
+      Number.isSafeInteger(validation[type]?.collected) && validation[type].collected >= validation[type].expected)) {
       return fail(operation, 'The scan could not be verified as complete. Retry checking; no non-followers were confirmed.', 'incomplete_scan');
     }
     const results = message.results;

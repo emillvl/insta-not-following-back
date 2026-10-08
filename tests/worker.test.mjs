@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
 
 const workerSource = readFileSync('extension/service-worker.js', 'utf8');
-const verified = { verified: true, following: { expected: 2, collected: 2 }, followers: { expected: 1, collected: 1 } };
+const verified = { verified: true, settled: true, following: { expected: 2, collected: 2 }, followers: { expected: 1, collected: 1 } };
 function harness(initialTabs = [], initialOperation) {
   let operation = initialOperation;
   let nextId = 100;
@@ -169,8 +169,10 @@ test('completed results can reopen in a new tab after the original was closed', 
 
 test('missing, rounded or incomplete collection evidence cannot publish non-followers', async () => {
   for (const validation of [undefined, { ...verified, verified: false },
+    { ...verified, settled: undefined }, { ...verified, settled: false },
     { ...verified, followers: { expected: 10000, collected: 250 } },
-    { ...verified, followers: { expected: 1.2, collected: 1.2 } }]) {
+    { ...verified, followers: { expected: 1.2, collected: 1.2 } },
+    { ...verified, followers: { expected: 1, collected: Infinity } }]) {
     const h = harness([{ id: 12, url: 'https://www.instagram.com/me/' }],
       { status: 'running', tabId: 12, runId: 'safe' });
     await h.dispatch({ type: 'F4F_FINISHED', runId: 'safe', validation,
@@ -188,5 +190,16 @@ test('actual collection progress changes the message without marking completion'
   assert.equal(h.operation.status, 'running');
   assert.match(h.operation.message, /250 of 10000/);
   await h.dispatch({ type: 'F4F_PROGRESS', runId: 'progress', list: 'followers', collected: 10001, expected: 10000 }, h.page(13));
-  assert.match(h.operation.message, /250 of 10000/);
+  assert.match(h.operation.message, /10001 accounts \(profile shows 10000\)/);
+  assert.equal(h.operation.status, 'running');
+});
+
+test('settled collection can retain deactivated accounts above the displayed count', async () => {
+  const h = harness([{ id: 14, url: 'https://www.instagram.com/me/' }],
+    { status: 'running', tabId: 14, runId: 'deactivated' });
+  const validation = { ...verified, followers: { expected: 108, collected: 110 } };
+  const results = { heading: 'h', summary: 's', accounts: [{ name: 'deactivated', href: '/deactivated' }] };
+  await h.dispatch({ type: 'F4F_FINISHED', runId: 'deactivated', results, validation }, h.page(14));
+  assert.equal(h.operation.status, 'completed');
+  assert.deepEqual(h.operation.results, results);
 });
