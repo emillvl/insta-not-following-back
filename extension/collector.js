@@ -3,6 +3,7 @@ globalThis.F4FCollector = (() => {
   const ROWS = 'a[role="link"][href^="/"]';
   const STEP_MS = 200;
   const RETRY_WAITS = [1500, 3000, 6000, 10000];
+  const DIALOG_RECOVERY_MS = 3000;
   const LIST_LIMIT_MS = 20 * 60 * 1000;
   let username, active, counts, current, failureReason, lastProgress = 0;
   const reports = {};
@@ -52,13 +53,13 @@ globalThis.F4FCollector = (() => {
         for (const node of record.removedNodes) capture(node);
       }
     }
-    if (current.users.size !== before) progress();
+    if (current.users.size !== before) { current.recoveries = 0; progress(); }
     current.wake?.();
   }
   function flush() {
     if (current.observer) mutations(current.observer.takeRecords());
   }
-  // One outstanding timer and one observer per list; no repeated full-list scans.
+  // One outstanding wait; no repeated full-list scans.
   function wait(ms, predicate = () => false) {
     check();
     return new Promise((resolve, reject) => {
@@ -69,7 +70,10 @@ globalThis.F4FCollector = (() => {
         clearTimeout(timer); if (current?.wake === wake) current.wake = null;
         try { check(); if (error) reject(error); else resolve(value); } catch (problem) { reject(problem); }
       };
-      const wake = () => { try { if (predicate()) finish(true); } catch (error) { finish(false, error); } };
+      const wake = () => {
+        try { if (!current.dialog.isConnected || predicate()) finish(true); }
+        catch (error) { finish(false, error); }
+      };
       const timer = setTimeout(() => { try { finish(predicate()); } catch (error) { finish(false, error); } }, ms);
       current.wake = wake;
       wake();
@@ -87,6 +91,37 @@ globalThis.F4FCollector = (() => {
     const areas = [...dialog.querySelectorAll('div')].filter(node => node.clientHeight > 0 &&
       (node.scrollHeight > node.clientHeight || /auto|scroll/.test(getComputedStyle(node).overflowY)));
     return areas.reduce((best, node) => !best || node.scrollHeight > best.scrollHeight ? node : best, null);
+  }
+  function observeDialog(dialog) {
+    const scan = current;
+    scan.observer?.disconnect(); scan.lifecycleObserver?.disconnect();
+    scan.dialog = dialog; scan.area = null; scan.lastRow = null;
+    scan.observer = new MutationObserver(records => { if (current === scan) mutations(records); });
+    scan.observer.observe(dialog, { subtree: true, childList: true, attributes: true,
+      attributeOldValue: true, attributeFilter: ['href', 'role', 'aria-busy'] });
+    // Watch only direct children of the ancestors. Replacing a modal or its
+    // wrapper wakes the current wait without observing all page descendants.
+    scan.lifecycleObserver = new MutationObserver(() => {
+      if (current === scan && !scan.dialog.isConnected) scan.wake?.();
+    });
+    for (let parent = dialog.parentNode; parent; parent = parent.parentNode) {
+      scan.lifecycleObserver.observe(parent, { childList: true });
+    }
+  }
+  async function ensureDialog() {
+    if (current.dialog.isConnected) return;
+    // Keep pending rows from the old render before changing observers.
+    flush(); current.observer.disconnect(); current.lifecycleObserver.disconnect();
+    const message = 'The Instagram list disappeared and did not reopen. Retry checking.';
+    if (++current.recoveries > RETRY_WAITS.length) throw failure(message, 'interrupted');
+    const end = Date.now() + DIALOG_RECOVERY_MS;
+    while (true) {
+      check();
+      const dialog = document.querySelector('div[role="dialog"]');
+      if (dialog) { observeDialog(dialog); return; }
+      if (Date.now() >= end) throw failure(message, 'interrupted');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
   }
   function loading() {
     return [...current.dialog.querySelectorAll('[role="progressbar"], [aria-busy="true"]')]
@@ -124,18 +159,17 @@ globalThis.F4FCollector = (() => {
   }
   async function open(type) {
     check();
-    current = { type, expected: counts[type], users: new Set(), deadline: Date.now() + LIST_LIMIT_MS };
+    current = { type, expected: counts[type], users: new Set(), recoveries: 0, deadline: Date.now() + LIST_LIMIT_MS };
     progress(true);
     if (current.expected === 0) return;
     const control = F4FListControls.find(document, username, type);
     if (!control) throw failure(`Instagram’s ${type} control is unavailable. Reload your profile and retry.`, 'page_readiness');
     control.click();
-    await until(() => Boolean(document.querySelector('div[role="dialog"]')), 15000,
-      `Instagram’s ${type} dialog did not open. Retry checking.`);
-    current.dialog = document.querySelector('div[role="dialog"]');
-    current.observer = new MutationObserver(mutations);
-    current.observer.observe(current.dialog, { subtree: true, childList: true,
-      attributes: true, attributeOldValue: true, attributeFilter: ['href', 'role', 'aria-busy'] });
+    await until(() => {
+      const dialog = document.querySelector('div[role="dialog"]');
+      if (!dialog) return false;
+      observeDialog(dialog); return true;
+    }, 15000, `Instagram’s ${type} dialog did not open. Retry checking.`);
   }
   async function collect() {
     check();
@@ -143,7 +177,7 @@ globalThis.F4FCollector = (() => {
     let retries = 0;
     while (true) {
       check();
-      if (!current.dialog.isConnected) throw failure('The Instagram list was closed during checking. Retry checking.', 'interrupted');
+      if (!current.dialog.isConnected) await ensureDialog();
       if (!current.area?.isConnected) {
         current.area = scrollArea(current.dialog);
         current.lastRow = null;
@@ -169,7 +203,7 @@ globalThis.F4FCollector = (() => {
           Boolean(current.area && current.area.scrollHeight > beforeHeight));
       }
       flush();
-      if (current.users.size > before) retries = 0;
+      if (current.users.size > before) { retries = 0; current.recoveries = 0; }
       progress();
     }
     reports[current.type] = { expected: current.expected, collected: current.users.size };
@@ -185,10 +219,15 @@ globalThis.F4FCollector = (() => {
   }
   async function close() {
     if (!current) return;
-    current.observer?.disconnect();
-    if (current.dialog?.isConnected) {
-      clickClose(current.dialog);
-      await until(() => !current.dialog.isConnected, 2500, 'Instagram’s list could not be closed. Close it and retry checking.');
+    current.observer?.disconnect(); current.lifecycleObserver?.disconnect();
+    const end = Date.now() + 2500;
+    while (current.dialog) {
+      const dialog = current.dialog.isConnected ? current.dialog : document.querySelector('div[role="dialog"]');
+      if (!dialog) break;
+      current.dialog = dialog;
+      if (Date.now() >= end) throw failure('Instagram’s list could not be closed. Close it and retry checking.', 'page_readiness');
+      clickClose(dialog);
+      await until(() => !dialog.isConnected, end - Date.now(), 'Instagram’s list could not be closed. Close it and retry checking.');
     }
     current = null;
   }
@@ -202,7 +241,7 @@ globalThis.F4FCollector = (() => {
     return { verified: true, following: { ...reports.following }, followers: { ...reports.followers } };
   }
   function dispose() {
-    current?.observer?.disconnect();
+    current?.observer?.disconnect(); current?.lifecycleObserver?.disconnect();
     if (current?.dialog?.isConnected) { try { clickClose(current.dialog); } catch { /* Best-effort owned-dialog cleanup. */ } }
     current = null;
     for (const type of ['following', 'followers']) delete reports[type];
