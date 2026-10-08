@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "F4F Checker",
+  "version": "1.0.0",
+  "description": "Check who does not follow back using the original Instagram page checker.",
+  "minimum_chrome_version": "112",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["https://www.instagram.com/*", "https://instagram.com/*"],
+  "background": { "service_worker": "service-worker.js" },
+  "action": { "default_title": "F4F Checker", "default_popup": "popup.html" },
+  "content_scripts": [{
+    "matches": ["https://www.instagram.com/*", "https://instagram.com/*"],
+    "js": ["localization.js", "content.js"],
+    "run_at": "document_idle"
+  }],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
