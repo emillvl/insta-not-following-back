@@ -4,8 +4,10 @@ The user wants to check their own account, see genuine operation status and
 read the original list of accounts that do not follow back. Start Checking is
 the primary idle action. Running shows an indeterminate ring, current stage
 and the active-tab reminder. Completed offers View Results and another check.
-Errors explain recovery; login and an explicit username fallback appear only
-when needed. No invented percentages or additional account categories.
+Errors explain recovery; logged-out users sign in normally on Instagram. Start
+uses Instagram's native Profile control and automatically continues on the own
+profile page. There is no username form. No invented percentages or additional
+account categories.
 
 Tokens: white #FFFFFF, near-black #121212, light gray #F5F5F5, purple #833AB4,
 pink #C13584, magenta #E1306C, orange #F77737, yellow #FCAF45. Use dark purple

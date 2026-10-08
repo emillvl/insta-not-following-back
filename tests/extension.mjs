@@ -13,10 +13,13 @@ const { chromium } = require(process.env.F4F_PLAYWRIGHT_PATH || 'playwright');
 const extensionPath = resolve('extension');
 const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
-  <nav><a href="/me/"><img alt=""><span>Profile</span></a></nav>
+  <div id="sidebar"><a href="/me/"><span>Profile</span></a></div>
+  <main><a id="edit" href="/accounts/edit/">Edit profile</a>
   <a href="/me/following/" data-kind="following">Following</a>
   <a href="/me/followers/" data-kind="followers">Followers</a>
+  </main>
   <script>
+  if(!['/me','/me/'].includes(location.pathname))document.getElementById('edit').remove();
   for(const link of document.querySelectorAll('[data-kind]'))link.onclick=event=>{
     event.preventDefault();const dialog=document.createElement('div');dialog.setAttribute('role','dialog');
     const close=document.createElement('button');close.setAttribute('aria-label','Fermer');close.onclick=()=>dialog.remove();
@@ -54,6 +57,8 @@ try {
   worker.on('console', msg => { if (msg.type() === 'error') workerErrors.push(msg.text()); });
   const instagram = await context.newPage();
   await instagram.goto('https://www.instagram.com/me/');
+  // Screenshot regression: the own page has Edit profile but no usable sidebar.
+  await instagram.evaluate(() => document.getElementById('sidebar').remove());
   const instagramTab = await worker.evaluate(async () => (await chrome.tabs.query({ url: 'https://www.instagram.com/*' }))[0]);
   // Accelerate only test-world timers after the real declarative scripts loaded.
   // Production code and its specified delays are left untouched on disk.
@@ -91,13 +96,14 @@ try {
   const reopened = await context.newPage();
   await reopened.goto(`chrome-extension://${extensionId}/popup.html`);
   await reopened.locator('#view').waitFor({ state: 'visible' });
+  assert.equal(await reopened.locator('input, form').count(), 0);
   assert.match(await reopened.locator('#title').textContent(), /Checking Complete/);
   await instagram.locator('#closeF4FBox').click();
   await reopened.locator('#view').click();
   await instagram.waitForSelector('[data-f4f-results]');
   assert.deepEqual(await instagram.locator('[data-f4f-results] li a').allTextContents(), ['missing']);
   assert.deepEqual(workerErrors, []);
-  console.log('PASS: real unpacked MV3 load, worker, Instagram-only content injection, active tab reuse, popup-independent execution, localized modal close, genuine completion, session state on reopening and View Results.');
+  console.log('PASS: real unpacked MV3 load, own-page Edit profile without sidebar, active tab reuse, popup-independent execution, localized modal close, genuine completion, session state on reopening and View Results without username input.');
   // A separate run starts with no Instagram tabs and goes from home to own profile.
   await instagram.close();
   await worker.evaluate(() => chrome.storage.session.clear());

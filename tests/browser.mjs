@@ -16,7 +16,7 @@ const native = { following: [['mutual', 'missing', 'mutual', 'explore', 'reels']
   followers: [['mutual', 'fan'], ['mutual', 'fan']] };
 function fixture(data, label, broken = false) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Instagram fixture</title></head><body style="margin:0;background:#f5f5f5;font-family:system-ui">
-  <nav style="padding:24px"><a href="/me/"><img alt="" width="20" height="20"><span>Profile</span></a></nav>
+  <div id="sidebar" style="padding:24px"><div role="button"><a href="/me/"><span>Profile</span></a></div></div>
   <main style="margin:40px auto;max-width:700px"><h1>me <small>— test fixture</small></h1>
   <a href="/me/following/" data-list="following">Following</a> · <a href="/me/followers/" data-list="followers">Followers</a></main>
   <script>
@@ -118,26 +118,66 @@ try {
   await failure.close(); checks++;
   const navigation = await pageFor(native, 'Close', false, '/explore/');
   await install(navigation);
-  await navigation.evaluate(() => __dispatch({ type: 'F4F_ASSIST', runId: 'navigation' }));
+  await navigation.evaluate(() => {
+    document.querySelector('#sidebar a').addEventListener('click', () => sessionStorage.setItem('nativeProfileClicked', 'yes'));
+    return __dispatch({ type: 'F4F_ASSIST', runId: 'navigation' });
+  });
   await navigation.waitForURL('https://www.instagram.com/me/');
+  assert.equal(await navigation.evaluate(() => sessionStorage.getItem('nativeProfileClicked')), 'yes');
   await navigation.close(); checks++;
-  const fallback = await pageFor();
-  await install(fallback);
-  await fallback.evaluate(() => {
-    document.querySelector('nav').remove();
-    const now = Date.now; Date.now = () => now() + 20000;
-    return __dispatch({ type: 'F4F_ASSIST', runId: 'fallback' });
+  const manual = await pageFor(native, 'Close', false, '/someone_else/');
+  await install(manual);
+  await manual.evaluate(() => {
+    document.querySelector('#sidebar').remove();
+    return __dispatch({ type: 'F4F_ASSIST', runId: 'manual' });
   });
-  // The wait clock is reset on assist, so advance it after the start.
-  await fallback.evaluate(() => { const now = Date.now; Date.now = () => now() + 20000; });
-  await fallback.waitForFunction(() => __messages.some(m => m.reason === 'needs_profile'));
-  assert.equal(await fallback.evaluate(() => __messages.some(m => m.type === 'F4F_READY')), false);
-  await fallback.evaluate(async () => {
-    await __dispatch({ type: 'F4F_RESET_WAIT' });
-    await __dispatch({ type: 'F4F_ASSIST', runId: 'fallback', username: 'me' });
+  await manual.waitForFunction(() => __messages.some(m => m.reason === 'waiting_profile'));
+  await manual.evaluate(() => { const now = Date.now; Date.now = () => now() + 20000; });
+  assert.equal(await manual.evaluate(() => __messages.some(m => m.type === 'F4F_READY')), false);
+  await manual.evaluate(() => {
+    history.replaceState({}, '', '/me/');
+    const edit = document.createElement('a'); edit.href = '/accounts/edit/'; edit.textContent = 'Edit profile';
+    document.querySelector('main').append(edit);
   });
-  await fallback.waitForFunction(() => __messages.some(m => m.type === 'F4F_READY'));
-  await fallback.close(); checks++;
+  await manual.waitForFunction(() => __messages.some(m => m.type === 'F4F_READY'));
+  await manual.close(); checks++;
+  // Reproduce the screenshot: own profile with Edit profile, but no recognizable sidebar.
+  for (const label of ['Edit profile', 'Profili düzenle']) {
+    const own = await pageFor(native, 'Close', false, '/me');
+    await own.evaluate(label => {
+      document.querySelector('#sidebar').remove();
+      const edit = document.createElement('a'); edit.href = '/accounts/edit/'; edit.textContent = label;
+      document.querySelector('main').append(edit);
+    }, label);
+    await adapted(own);
+    assert.deepEqual((await snapshot(own)).accounts.map(account => account.name), ['missing', 'later']);
+    await own.close(); checks++;
+  }
+  // Mobile/icon controls carry the label in an SVG instead of an avatar or text.
+  const icon = await pageFor(native, 'Close', false, '/someone_else/');
+  await install(icon);
+  await icon.evaluate(() => {
+    const link = document.querySelector('#sidebar a'); link.innerHTML = '<svg aria-label="Profile"></svg>';
+    return __dispatch({ type: 'F4F_ASSIST', runId: 'icon' });
+  });
+  await icon.waitForURL('https://www.instagram.com/me/');
+  await icon.close(); checks++;
+  // A button-only Profile action navigates through Instagram's own SPA handler.
+  const buttonProfile = await pageFor(native, 'Close', false, '/explore/');
+  await install(buttonProfile);
+  await buttonProfile.evaluate(() => {
+    const button = document.createElement('button'); button.textContent = 'Profile';
+    document.querySelector('#sidebar').replaceChildren(button);
+    button.onclick = () => {
+      history.replaceState({}, '', '/me/');
+      const edit = document.createElement('button'); edit.textContent = 'Edit profile';
+      document.querySelector('main').append(edit);
+    };
+    return __dispatch({ type: 'F4F_ASSIST', runId: 'button' });
+  });
+  await buttonProfile.waitForFunction(() => __messages.some(m => m.type === 'F4F_READY'));
+  assert.equal(new URL(buttonProfile.url()).pathname, '/me/');
+  await buttonProfile.close(); checks++;
   const login = await pageFor(native, 'Close', false, '/accounts/login/');
   await install(login);
   await login.evaluate(() => __dispatch({ type: 'F4F_ASSIST', runId: 'login' }));
@@ -156,7 +196,7 @@ try {
   await timeout.waitForFunction(() => __messages.some(m => m.reason === 'readiness_error'));
   assert.equal(await timeout.evaluate(() => __messages.some(m => m.type === 'F4F_READY')), false);
   await timeout.close(); checks++;
-  console.log('PASS: error is not completion, own-profile navigation, explicit identity fallback, login gating/resume and readiness timeout.');
+  console.log('PASS: native Profile click without nav/avatar, own Edit profile regression, manual navigation after 15 seconds, icon/button controls, login gating/resume and readiness timeout.');
 
   // Visual fixtures use the actual popup HTML/CSS/JS with a fake extension API.
   const server = createServer((req, res) => {
@@ -182,7 +222,7 @@ try {
       { status: 'running', message: 'Checking following, then followers…' },
       { status: 'completed', message: 'Checking Complete', results: { heading: 'Seni Takip Etmeyenler (2)', summary: 'Takip Ettiğin: 4 | Takipçi: 2', accounts: [] } },
       { status: 'error', message: 'Instagram was reloaded. Please retry.' },
-      { status: 'waiting', reason: 'needs_profile', message: 'Your own profile could not be identified. Enter your Instagram username to continue.' },
+      { status: 'waiting', reason: 'waiting_profile', message: 'Waiting for Instagram’s Profile control…' },
       { status: 'waiting', reason: 'login_required', message: 'Log in to Instagram in this tab. Checking will continue after login.' }
     ]) {
       await visual.evaluate(state => __render(state), state);
@@ -195,10 +235,9 @@ try {
       await visual.screenshot({ path: `artifacts/popup-${state.reason || state.status}.png`, fullPage: true });
       checks++;
     }
-    await visual.evaluate(() => __render({ status: 'waiting', reason: 'needs_profile', message: 'Enter your username.' }));
-    await visual.locator('#username').fill('my.account');
-    await visual.locator('#profile-form button').click();
-    assert.ok(await visual.evaluate(() => __sent.some(msg => msg.type === 'F4F_CONTINUE' && msg.username === 'my.account')));
+    assert.equal(await visual.locator('input, form').count(), 0);
+    await visual.locator('#continue').click();
+    assert.ok(await visual.evaluate(() => __sent.some(msg => msg.type === 'F4F_CONTINUE' && !('username' in msg))));
     assert.deepEqual(errors, []);
     await visual.close();
     const results = await pageFor();
@@ -216,7 +255,7 @@ try {
     await results.setViewportSize({ width: 1200, height: 800 });
     await results.screenshot({ path: 'artifacts/warning-running.png' });
     await results.close(); checks++;
-    console.log('PASS: six popup state renders, username recovery action, result links/close, responsive result bounds and warning screenshots.');
+    console.log('PASS: six popup state renders, login continuation with no username form, result links/close, responsive result bounds and warning screenshots.');
   } finally { server.close(); }
   console.log(`Browser fixture checks passed: ${checks}. Actual authenticated Instagram remains a manual test.`);
 } finally { await browser.close(); }

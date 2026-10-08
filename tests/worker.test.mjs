@@ -87,14 +87,14 @@ test('own-profile active tab is reused; only genuine result event marks completi
   await h.dispatch({ type: 'F4F_VIEW_RESULTS' });
   assert.equal(h.calls.at(-1)[2].type, 'F4F_SHOW_RESULTS');
 });
-test('login/username recovery persists through popup status reads and resumes', async () => {
+test('login recovery and native profile identity persist without accepting a typed username', async () => {
   const h = harness([{ id: 4, url: 'https://www.instagram.com/accounts/login/', active: true }]);
   const op = await h.dispatch({ type: 'F4F_START' });
   await h.dispatch({ type: 'F4F_WAIT_STATUS', runId: op.runId,
     reason: 'login_required', message: 'Log in first.' }, h.page(4));
   assert.equal((await h.dispatch({ type: 'F4F_STATUS' })).reason, 'login_required');
   await h.dispatch({ type: 'F4F_CONTINUE', username: 'my.account' });
-  assert.equal(h.operation.username, 'my.account');
+  assert.equal(h.operation.username, null);
   assert.ok(h.calls.some(call => call[0] === 'message' && call[2].type === 'F4F_RESET_WAIT'));
   await h.dispatch({ type: 'F4F_WAIT_STATUS', runId: op.runId, reason: 'profile_navigation',
     message: 'Opening your profile…', username: 'identified.account' }, h.page(4));

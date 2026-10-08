@@ -10,11 +10,11 @@ scraper, remote executable code, analytics or runtime dependencies are used.
 2. Enable **Developer mode**, choose **Load unpacked**, and select this project's
    **extension** folder (the folder containing `manifest.json`, not the root).
 3. Pin F4F Checker if desired. Open it from any tab and select **Start Checking**.
-4. Instagram is brought to the foreground. Log in if prompted. The extension
-   uses an explicitly labelled profile link with an avatar inside a navigation
-   container to identify your own profile. If that is unavailable or ambiguous,
-   enter your own username in the extension's recovery form; it never guesses
-   from whichever profile you happened to be visiting.
+4. Instagram is brought to the foreground. If already logged in, the extension
+   uses Instagram's native **Profile** control to open your own profile and starts
+   automatically. If logged out, sign in on Instagram; checking continues after
+   login. There is no username entry in the extension. If you are already on your
+   own profile, its **Edit profile** control confirms that the checker can start.
 5. Keep Instagram open and active until checking finishes. Closing the popup
    does not stop checking. Switching tabs may delay or interrupt it.
 6. Read the result box on Instagram, or reopen the extension and select
@@ -26,18 +26,25 @@ result with count zero, not an error. Check Again runs the original checker
 again. Reloading/navigating away from the checking page or closing that tab
 reports interruption; the extension does not silently restart it.
 
+After updating the unpacked extension to **1.0.1**, click its Reload button on
+`chrome://extensions`, refresh the Instagram page, then select Start Checking.
+Refreshing replaces the previous content script and its stalled wait state.
+
 ## Architecture and navigation
 
 - `service-worker.js` serializes navigation and lifecycle events, activates the
   selected Instagram tab and focuses its browser window. It prefers the active
   Instagram tab, then an Instagram tab in the current window, then another
   existing Instagram tab; otherwise it creates one active Instagram tab.
-- `content.js` runs only in Instagram's top frame. It identifies the own-profile
-  navigation link, navigates to that profile, waits for the exact following and
-  follower hrefs required by the original, and requests a single run. Login is
-  gated and can resume after login. No authentication is bypassed. Recognition
-  waits 15 seconds before requesting an explicit username; list readiness has
-  a 60-second deadline. These waits are separate from the checker.
+- `content.js` runs only in Instagram's top frame. It clicks the visible native
+  Profile control, including plain sidebar links, accessible SVG icons and
+  buttons, without requiring a semantic nav wrapper or avatar. On an own-profile
+  page, the native Edit profile route or label provides independent ownership
+  evidence. It waits for the exact following and follower hrefs required by the
+  original, then requests a single run. The current pathname alone is never
+  ownership evidence. Login is gated and resumes after normal authentication.
+  Readiness keeps polling through SPA/manual profile navigation, with a 60-second
+  deadline; it no longer stops at 15 seconds. These waits are outside the checker.
 - The worker claims the ready page, records **running**, then injects packaged
   `adapter.js` and `checker-runner.js` into Chrome's default **isolated content
   script world**. They operate on the real Instagram DOM and click its controls;
@@ -47,7 +54,7 @@ reports interruption; the extension does not silently restart it.
   extension error, and requires its genuine results box before completion.
   Injection and profile navigation never count as successful checking.
 - `popup.html`, `popup.css` and `popup.js` show idle, navigating, waiting, running,
-  completed and error states, including login and username recovery. They use
+  completed and error states, including normal Instagram login recovery. They use
   indeterminate indicators, never fabricated percentages.
 - Operation state and original rendered output are held in `chrome.storage.session`.
   Reopening the popup or worker suspension does not erase them. Session data
@@ -91,8 +98,10 @@ Turkish recognition remains available. The separate Close-label mapping also
 handles Spanish, French, German, Italian, Portuguese, Russian, Arabic, Japanese
 and Korean labels. These exact labels have passed DOM/browser fixtures; they
 have **not** been verified against every current live Instagram localization.
-An unrecognized profile label asks for a username. Instagram may change its
-DOM or translations; universal language compatibility is not claimed.
+Unrecognized controls produce a retryable navigation error after the readiness
+deadline, never a username form. Visiting your own Profile section while the
+extension waits resumes automatically. Instagram may change its DOM or
+translations; universal language compatibility is not claimed.
 
 The 360px popup uses explicit purple/pink/orange/yellow design tokens, readable
 type, focused actions and accessible focus states. The original results box is
@@ -150,9 +159,10 @@ in ignored `artifacts/`; fixture examples are labelled as test content.
   its list virtualization, may fail on a changed modal DOM, and has no timeout
   while list contents/heights keep changing. These original limitations were
   deliberately preserved. No API fallback or new pagination logic is used.
-- An Instagram navigation container or exact Close label may be unavailable.
-  Username recovery covers identity; unsupported modal controls may still fail
-  or exhibit the original backdrop fallback behavior.
+- A native Profile control or exact Close label may be unavailable. The own-page
+  Edit profile control also confirms identity. Unsupported navigation controls
+  may require opening Profile in Instagram while the extension waits; unsupported
+  modal controls may still exhibit the original backdrop fallback behavior.
 - Large results can exceed session storage capacity; the original on-page list
   stays available and the extension reports a storage error.
 - Only one checking operation runs at a time. Browser restart/extension reload
@@ -197,7 +207,7 @@ Generated, ignored visual verification files:
 - `artifacts/popup-running.png`
 - `artifacts/popup-completed.png`
 - `artifacts/popup-error.png`
-- `artifacts/popup-needs_profile.png`
+- `artifacts/popup-waiting_profile.png`
 - `artifacts/popup-login_required.png`
 - `artifacts/results-desktop.png`
 - `artifacts/results-narrow.png`

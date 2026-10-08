@@ -12,7 +12,8 @@ test('original checker and embedded runner preserve the recorded bytes', () => {
   assert.notEqual(readFileSync('extension/checker-runner.js').indexOf(source), -1);
 });
 function selectors() {
-  const context = vm.createContext({ URL, location: { origin: 'https://www.instagram.com' } });
+  const context = vm.createContext({ URL, location: { origin: 'https://www.instagram.com',
+    href: 'https://www.instagram.com/me/' } });
   vm.runInContext(readFileSync('extension/localization.js', 'utf8'), context);
   return context.F4FSelectors;
 }
@@ -44,20 +45,38 @@ test('other collection selectors are delegated without fallback', () => {
   selectors().querySelector({ querySelector: selector => { calls.push(selector); return null; } }, 'div[role="dialog"]');
   assert.deepEqual(calls, ['div[role="dialog"]']);
 });
-test('identity ignores visited profiles, arbitrary avatars, reserved routes and ambiguous labels', () => {
+test('native Profile labels work without semantic navigation containers or avatars', () => {
   const mapping = selectors();
   const link = (href, text, avatar = true, navigation = true) => ({ textContent: text,
     getAttribute: key => key === 'href' ? href : null,
-    closest: () => navigation ? {} : null,
+    closest: selector => selector === 'main, [role="main"]' && !navigation ? {} : null,
+    getClientRects: () => [{}],
     querySelector: () => avatar ? {} : null, querySelectorAll: () => [] });
   const document = links => ({ querySelectorAll: () => links });
   assert.equal(mapping.ownProfile(document([link('/someone_else/', 'Someone else')])), null);
   assert.equal(mapping.ownProfile(document([link('/someone_else/', 'Profile', true, false)])), null);
-  assert.equal(mapping.ownProfile(document([link('/me/', 'Profile', false)])), null);
+  assert.equal(mapping.ownProfile(document([link('/me/', 'Profile', false)])), 'me');
   assert.equal(mapping.ownProfile(document([link('/accounts/', 'Profile')])), null);
   assert.equal(mapping.ownProfile(document([link('/me/', 'Profile'), link('/other/', 'Profile')])), null);
   for (const label of mapping.profileLabels) {
     assert.equal(mapping.ownProfile(document([link('/me/', label)])), 'me');
   }
   assert.equal(mapping.usernameFromHref('https://evil.test/me/'), null);
+});
+test('the current pathname alone is never treated as the authenticated profile', () => {
+  const mapping = selectors();
+  const document = { querySelector: () => null, querySelectorAll: () => [] };
+  assert.equal(mapping.currentOwnProfile(document), null);
+  for (const label of mapping.editProfileLabels) {
+    const edit = { getAttribute: () => null, textContent: label,
+      querySelectorAll: () => [], closest: () => null, getClientRects: () => [{}] };
+    assert.equal(mapping.currentOwnProfile({ ...document, querySelectorAll: () => [edit] }), 'me');
+  }
+  const editLink = href => ({ getAttribute: key => key === 'href' ? href : null,
+    textContent: 'Unmapped language', querySelectorAll: () => [], closest: () => null,
+    getClientRects: () => [{}] });
+  assert.equal(mapping.currentOwnProfile({ ...document,
+    querySelectorAll: () => [editLink('/accounts/edit/')] }), 'me');
+  assert.equal(mapping.currentOwnProfile({ ...document,
+    querySelectorAll: () => [editLink('https://example.com/accounts/edit/')] }), null);
 });
