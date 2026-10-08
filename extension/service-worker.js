@@ -131,7 +131,10 @@ async function handle(message, sender) {
   }
   if (!fromPage(sender, operation, message)) return { ignored: true };
   if (message.type === 'F4F_WAIT_STATUS' && operation.status === 'waiting') {
-    return save({ ...operation, reason: message.reason, message: message.message });
+    const username = message.reason === 'profile_navigation' &&
+      typeof message.username === 'string' && /^[a-zA-Z0-9._]{1,30}$/.test(message.username) ?
+      message.username : operation.username;
+    return save({ ...operation, username, reason: message.reason, message: message.message });
   }
   if (message.type === 'F4F_READY' && operation.status === 'waiting') {
     await foreground(operation.tabId);

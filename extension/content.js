@@ -109,7 +109,8 @@
   async function waitStatus(reason, message) {
     if (reason === lastReason) return;
     lastReason = reason;
-    await send({ type: 'F4F_WAIT_STATUS', reason, message });
+    await send({ type: 'F4F_WAIT_STATUS', reason, message,
+      username: reason === 'profile_navigation' ? username : undefined });
   }
   async function assist() {
     if (assisting || claimed || running) return;

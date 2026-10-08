@@ -96,6 +96,12 @@ test('login/username recovery persists through popup status reads and resumes', 
   await h.dispatch({ type: 'F4F_CONTINUE', username: 'my.account' });
   assert.equal(h.operation.username, 'my.account');
   assert.ok(h.calls.some(call => call[0] === 'message' && call[2].type === 'F4F_RESET_WAIT'));
+  await h.dispatch({ type: 'F4F_WAIT_STATUS', runId: op.runId, reason: 'profile_navigation',
+    message: 'Opening your profile…', username: 'identified.account' }, h.page(4));
+  await h.dispatch({ type: 'F4F_STATUS' });
+  assert.equal(h.operation.username, 'identified.account');
+  assert.ok(h.calls.some(call => call[0] === 'message' && call[2].type === 'F4F_ASSIST' &&
+    call[2].username === 'identified.account'));
 });
 test('worker restart reads stored running state; stale page reports interruption', async () => {
   const op = { status: 'running', tabId: 5, runId: 'persisted', message: 'Checking' };
