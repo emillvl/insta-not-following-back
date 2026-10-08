@@ -38,7 +38,7 @@ async function foreground(tabId) {
 async function ensureContent(tabId) {
   try { await chrome.tabs.sendMessage(tabId, { type: 'F4F_PING' }); }
   catch {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['localization.js', 'content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['localization.js', 'list-controls.js', 'content.js'] });
   }
 }
 async function assist(operation) {

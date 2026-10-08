@@ -7,6 +7,8 @@ globalThis.F4FAdapter = {
     const adaptedDocument = new Proxy(document, {
       get(target, property) {
         if (property === 'querySelector') return selector => F4FSelectors.querySelector(target, selector);
+        if (property === 'querySelectorAll') return selector => selector === 'a' ?
+          F4FListControls.forOriginal(target) : target.querySelectorAll(selector);
         const value = Reflect.get(target, property, target);
         return typeof value === 'function' ? value.bind(target) : value;
       }

@@ -13,8 +13,7 @@
   const send = message => chrome.runtime.sendMessage({ ...message, runId });
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const ready = name => name && F4FSelectors.usernameFromHref(location.href) === name &&
-    ['following', 'followers'].every(type =>
-      Array.from(document.querySelectorAll('a')).some(link => link.getAttribute('href') === `/${name}/${type}/`));
+    ['following', 'followers'].every(type => F4FListControls.find(document, name, type));
   function warning(kind, message) {
     clearTimeout(bannerTimer);
     let host = document.getElementById('f4f-warning');
@@ -144,7 +143,7 @@
           }
           if (Date.now() - waitStarted > 60000) {
             await send({ type: 'F4F_FAILED', reason: 'readiness_error',
-              message: onOwnProfile ? 'Instagram did not expose the follower and following links. Return to your profile and retry.' :
+              message: onOwnProfile ? 'The follower and following controls could not be identified on this profile. Reload Instagram and retry.' :
                 'Instagram’s Profile control is unavailable. Open your Profile section in Instagram, then retry checking.' });
             return;
           }
