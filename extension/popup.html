@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>F4F Checker</title>
   <link rel="stylesheet" href="popup.css">
+  <script src="theme.js" defer></script>
   <script src="popup.js" defer></script>
 </head>
 <body>
@@ -28,6 +29,12 @@
     </div>
     <p id="action-error" role="alert" hidden></p>
   </main>
-  <footer><span class="privacy-dot" aria-hidden="true"></span>Runs in your browser. No account data is sent.</footer>
+  <footer>
+    <div class="appearance"><label for="appearance">Appearance</label><select id="appearance">
+      <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+    </select></div>
+    <p id="appearance-error" role="alert" hidden></p>
+    <p class="privacy"><span class="privacy-dot" aria-hidden="true"></span>Runs in your browser. No account data is sent.</p>
+  </footer>
 </body>
 </html>

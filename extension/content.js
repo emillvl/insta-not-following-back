@@ -25,9 +25,10 @@
       document.body.appendChild(host);
     }
     const root = warning.root;
+    F4FTheme.attach(host);
     root.replaceChildren();
     const style = document.createElement('style');
-    style.textContent = ':host{font:13px/1.5 system-ui,sans-serif;color:#121212}.banner{padding:12px 16px;background:#fff;border:1px solid #eaddeb;border-top:3px solid #C13584;border-radius:14px;box-shadow:0 6px 28px #12121224;display:flex;gap:12px}.ring{flex:none;width:18px;height:18px;margin-top:3px;border:2px solid #eaddeb;border-top-color:#833AB4;border-radius:50%;animation:spin 1s linear infinite}strong{display:block;font-size:13px;color:#833AB4;margin-bottom:3px}p{margin:0} .error strong{color:#b42318}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.ring{animation:none}}';
+    style.textContent = F4FTheme.css(':host') + ':host{font:13px/1.5 system-ui,sans-serif;color:var(--f4f-text)}.banner{padding:12px 16px;background:var(--f4f-bg);border:1px solid var(--f4f-border);border-top:3px solid #C13584;border-radius:14px;box-shadow:0 6px 28px var(--f4f-banner-shadow);display:flex;gap:12px}.ring{flex:none;width:18px;height:18px;margin-top:3px;border:2px solid var(--f4f-ring);border-top-color:var(--f4f-accent);border-radius:50%;animation:spin 1s linear infinite}strong{display:block;font-size:13px;color:var(--f4f-accent);margin-bottom:3px}p{margin:0}.error strong{color:var(--f4f-error)}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.ring{animation:none}}';
     const panel = document.createElement('div');
     panel.className = `banner ${kind}`;
     panel.setAttribute('role', kind === 'error' ? 'alert' : 'status');
@@ -51,24 +52,25 @@
     box.setAttribute('role', 'region');
     box.setAttribute('aria-label', 'F4F Checker results');
     box.tabIndex = -1;
-    box.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999999;background:#fff;color:#121212;padding:28px;max-height:75vh;overflow-y:auto;font:15px/1.6 system-ui,sans-serif;box-shadow:0 18px 70px #12121240;user-select:text;border-radius:20px;width:min(440px,calc(100vw - 32px));box-sizing:border-box;border:1px solid #eaddeb;border-top:4px solid #C13584;';
+    box.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999999;background:var(--f4f-bg);color:var(--f4f-text);padding:28px;max-height:75vh;overflow-y:auto;font:15px/1.6 system-ui,sans-serif;box-shadow:0 18px 70px var(--f4f-shadow);user-select:text;border-radius:20px;width:min(440px,calc(100vw - 32px));box-sizing:border-box;border:1px solid var(--f4f-border);border-top:4px solid #C13584;';
+    F4FTheme.attach(box);
     const title = box.querySelector('h3');
-    title.style.cssText = 'margin:0 32px 8px 0;font-size:20px;line-height:1.3;color:#121212;';
+    title.style.cssText = 'margin:0 32px 8px 0;font-size:20px;line-height:1.3;color:var(--f4f-text);';
     const summary = box.querySelector('div');
-    summary.style.cssText = 'margin-bottom:18px;color:#5b5360;font-size:13px;';
+    summary.style.cssText = 'margin-bottom:18px;color:var(--f4f-muted);font-size:13px;';
     const list = box.querySelector('ul');
-    list.style.cssText = 'list-style:none;padding:0;margin:0;color:#121212;';
+    list.style.cssText = 'list-style:none;padding:0;margin:0;color:var(--f4f-text);';
     for (const item of list.children) {
-      item.style.cssText = 'margin:0;border-top:1px solid #eee8ef;';
-      item.firstElementChild.style.cssText = 'display:block;padding:10px 4px;color:#833AB4;text-decoration:none;overflow-wrap:anywhere;';
+      item.style.cssText = 'margin:0;border-top:1px solid var(--f4f-border);';
+      item.firstElementChild.style.cssText = 'display:block;padding:10px 4px;color:var(--f4f-accent);text-decoration:none;overflow-wrap:anywhere;';
     }
     const close = box.querySelector('#closeF4FBox');
     close.setAttribute('aria-label', 'Close results');
-    close.style.cssText = 'position:absolute;top:16px;right:16px;border:0;background:#F5F5F5;color:#121212;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;';
+    close.style.cssText = 'position:absolute;top:16px;right:16px;border:0;background:var(--f4f-surface);color:var(--f4f-text);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;';
     if (!document.getElementById('f4f-result-style')) {
       const style = document.createElement('style');
       style.id = 'f4f-result-style';
-      style.textContent = '[data-f4f-results] a:hover{background:#faf5fc}[data-f4f-results]:focus-visible,[data-f4f-results] :focus-visible{outline:3px solid #833AB4;outline-offset:2px}';
+      style.textContent = F4FTheme.css('[data-f4f-results]') + '[data-f4f-results] a:hover{background:var(--f4f-hover)}[data-f4f-results]:focus-visible,[data-f4f-results] :focus-visible{outline:3px solid var(--f4f-accent);outline-offset:2px}';
       document.head.appendChild(style);
     }
   }

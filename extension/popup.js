@@ -1,4 +1,17 @@
 const el = id => document.getElementById(id);
+const themeStyle = document.createElement('style');
+themeStyle.textContent = F4FTheme.css(':root');
+document.head.appendChild(themeStyle);
+F4FTheme.attach(document.documentElement);
+F4FTheme.subscribe(preference => { el('appearance').value = preference; });
+el('appearance').addEventListener('change', async event => {
+  el('appearance-error').hidden = true;
+  try { await F4FTheme.setPreference(event.target.value); }
+  catch {
+    el('appearance-error').textContent = 'Your appearance choice could not be saved. Please try again.';
+    el('appearance-error').hidden = false;
+  }
+});
 const titles = { idle: 'Ready to check?', navigating: 'Opening Instagram', waiting: 'Getting ready',
   running: 'Checking in progress…', completed: 'Checking Complete', error: 'Checking stopped' };
 let operation = { status: 'idle' };
