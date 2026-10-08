@@ -9,7 +9,8 @@ function render(next) {
   const active = ['navigating', 'waiting', 'running'].includes(status);
   el('indicator').className = `indicator ${active ? 'running' : status}`;
   el('symbol').textContent = status === 'completed' ? '✓' : status === 'error' ? '!' : active ? '•••' : '↗';
-  el('title').textContent = titles[status] || titles.idle;
+  el('title').textContent = status === 'waiting' && next.reason === 'login_required' ?
+    'Login required' : titles[status] || titles.idle;
   el('message').textContent = status === 'idle' ? 'See which accounts you follow don’t follow you back.' : next.message;
   el('reminder').textContent = active ? 'Please keep the Instagram tab open and active. Switching tabs may interrupt or delay checking.' :
     status === 'completed' ? 'Your original results are ready on Instagram.' :
@@ -18,9 +19,8 @@ function render(next) {
   el('start').textContent = status === 'error' ? 'Retry Checking' : 'Start Checking →';
   el('view').hidden = status !== 'completed';
   el('again').hidden = status !== 'completed';
-  el('continue').hidden = !active || next.reason === 'needs_profile';
+  el('continue').hidden = !active;
   el('continue').textContent = next.reason === 'login_required' ? 'Continue After Login' : 'Return to Instagram';
-  el('profile-form').hidden = next.reason !== 'needs_profile' || status !== 'waiting';
   el('result-summary').hidden = status !== 'completed' || !next.results;
   el('result-summary').textContent = next.results ? `${next.results.heading}\n${next.results.summary}` : '';
   document.querySelectorAll('button').forEach(button => { button.disabled = busy; });
@@ -44,10 +44,6 @@ el('start').addEventListener('click', () => action('F4F_START'));
 el('again').addEventListener('click', () => action('F4F_START'));
 el('view').addEventListener('click', () => action('F4F_VIEW_RESULTS'));
 el('continue').addEventListener('click', () => action(operation.status === 'waiting' ? 'F4F_CONTINUE' : 'F4F_START'));
-el('profile-form').addEventListener('submit', event => {
-  event.preventDefault();
-  action('F4F_CONTINUE', { username: el('username').value.trim() });
-});
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'session' && changes.operation) render(changes.operation.newValue || { status: 'idle' });
 });

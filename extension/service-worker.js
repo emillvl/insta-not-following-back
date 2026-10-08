@@ -49,15 +49,14 @@ async function assist(operation) {
     type: 'F4F_ASSIST', runId: operation.runId, username: operation.username || null
   });
 }
-async function start(username) {
+async function start() {
   const previous = await read();
   if (ACTIVE.has(previous.status)) {
     if (previous.tabId) await foreground(previous.tabId);
     return previous;
   }
-  if (username && !/^[a-zA-Z0-9._]{1,30}$/.test(username)) throw new Error('Enter your Instagram username without @ or a URL.');
   let operation = await save({ status: 'navigating', message: 'Opening Instagram…',
-    runId: crypto.randomUUID(), startedAt: Date.now(), username: username || null });
+    runId: crypto.randomUUID(), startedAt: Date.now(), username: null });
   try {
     const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
     const instagram = await chrome.tabs.query({ url: IG_URLS });
@@ -67,7 +66,7 @@ async function start(username) {
       await chrome.tabs.create({ url: 'https://www.instagram.com/', active: true });
     if (!existing) await chrome.windows.update(tab.windowId, { focused: true });
     operation = await save({ ...operation, tabId: tab.id, status: 'waiting',
-      message: 'Finding your profile and waiting for Instagram…' });
+      message: 'Opening Instagram’s Profile section…' });
     await assist(operation);
     return operation;
   } catch (error) { return fail(operation, error.message, 'navigation_error'); }
@@ -90,13 +89,12 @@ async function status() {
 async function handle(message, sender) {
   if (fromPopup(sender)) {
     if (message.type === 'F4F_STATUS') return status();
-    if (message.type === 'F4F_START') return start(message.username);
+    if (message.type === 'F4F_START') return start();
     if (message.type === 'F4F_CONTINUE') {
       const operation = await read();
-      if (operation.status !== 'waiting') return start(message.username);
-      if (message.username && !/^[a-zA-Z0-9._]{1,30}$/.test(message.username)) throw new Error('Enter a valid username.');
-      const next = await save({ ...operation, username: message.username || operation.username,
-        reason: undefined, message: 'Waiting for your profile…' });
+      if (operation.status !== 'waiting') return start();
+      const next = await save({ ...operation, reason: undefined,
+        message: 'Opening Instagram’s Profile section…' });
       await foreground(next.tabId);
       await ensureContent(next.tabId);
       await chrome.tabs.sendMessage(next.tabId, { type: 'F4F_RESET_WAIT' });

@@ -7,11 +7,12 @@
   let username = null;
   let waitStarted = Date.now();
   let lastReason = '';
+  let clickedProfileFrom = null;
   let resultBox = null;
   let bannerTimer;
   const send = message => chrome.runtime.sendMessage({ ...message, runId });
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const ready = name => location.pathname === `/${name}/` &&
+  const ready = name => name && F4FSelectors.usernameFromHref(location.href) === name &&
     ['following', 'followers'].every(type =>
       Array.from(document.querySelectorAll('a')).some(link => link.getAttribute('href') === `/${name}/${type}/`));
   function warning(kind, message) {
@@ -124,28 +125,27 @@
           waitStarted = Date.now();
           await waitStatus('login_required', 'Log in to Instagram in this tab. Checking will continue after login.');
         } else {
-          const identified = F4FSelectors.ownProfile(document);
-          const name = identified || username;
-          if (!name) {
-            if (Date.now() - waitStarted > 15000) {
-              await waitStatus('needs_profile', 'Your own profile could not be identified. Enter your Instagram username to continue.');
-              return;
-            }
+          const ownPage = F4FSelectors.currentOwnProfile(document);
+          const profile = F4FSelectors.profileControl(document);
+          const name = ownPage || profile?.username || username;
+          if (name) username = name;
+          if (ready(name)) {
+            await send({ type: 'F4F_READY' });
+            return;
+          }
+          const onOwnProfile = name && F4FSelectors.usernameFromHref(location.href) === name;
+          if (!onOwnProfile && profile && clickedProfileFrom !== location.pathname) {
+            clickedProfileFrom = location.pathname;
+            await waitStatus('profile_navigation', 'Opening Instagram’s Profile section…');
+            profile.control.click();
           } else {
-            username = name;
-            if (location.pathname !== `/${name}/`) {
-              await waitStatus('profile_navigation', 'Opening your Instagram profile…');
-              location.assign(`https://www.instagram.com/${name}/`);
-              return;
-            }
-            if (ready(name)) {
-              await send({ type: 'F4F_READY' });
-              return;
-            }
+            await waitStatus(onOwnProfile ? 'page_readiness' : 'waiting_profile', onOwnProfile ?
+              'Waiting for your follower and following links…' : 'Waiting for Instagram’s Profile control…');
           }
           if (Date.now() - waitStarted > 60000) {
             await send({ type: 'F4F_FAILED', reason: 'readiness_error',
-              message: 'Instagram did not expose the follower and following links. Check your profile is accessible, then retry.' });
+              message: onOwnProfile ? 'Instagram did not expose the follower and following links. Return to your profile and retry.' :
+                'Instagram’s Profile control is unavailable. Open your Profile section in Instagram, then retry checking.' });
             return;
           }
         }
@@ -180,11 +180,11 @@
     if (sender.id !== chrome.runtime.id) return;
     if (message.type === 'F4F_PING') reply({ runId, running });
     else if (message.type === 'F4F_RESET_WAIT') {
-      waitStarted = Date.now(); lastReason = ''; reply({ ok: true });
+      waitStarted = Date.now(); lastReason = ''; clickedProfileFrom = null; reply({ ok: true });
     } else if (message.type === 'F4F_ASSIST') {
       if (runId !== message.runId) {
         runId = message.runId; waitStarted = Date.now(); lastReason = ''; claimed = false;
-        username = null;
+        username = null; clickedProfileFrom = null;
         resultBox?.remove(); resultBox = null;
       }
       username = message.username || username;
