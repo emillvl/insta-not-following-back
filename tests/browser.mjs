@@ -132,8 +132,31 @@ try {
   await fallback.evaluate(() => { const now = Date.now; Date.now = () => now() + 20000; });
   await fallback.waitForFunction(() => __messages.some(m => m.reason === 'needs_profile'));
   assert.equal(await fallback.evaluate(() => __messages.some(m => m.type === 'F4F_READY')), false);
+  await fallback.evaluate(async () => {
+    await __dispatch({ type: 'F4F_RESET_WAIT' });
+    await __dispatch({ type: 'F4F_ASSIST', runId: 'fallback', username: 'me' });
+  });
+  await fallback.waitForFunction(() => __messages.some(m => m.type === 'F4F_READY'));
   await fallback.close(); checks++;
-  console.log('PASS: error is not completion, own-profile navigation and identity fallback.');
+  const login = await pageFor(native, 'Close', false, '/accounts/login/');
+  await install(login);
+  await login.evaluate(() => __dispatch({ type: 'F4F_ASSIST', runId: 'login' }));
+  await login.waitForFunction(() => __messages.some(m => m.reason === 'login_required'));
+  assert.equal(await login.evaluate(() => __messages.some(m => m.type === 'F4F_READY')), false);
+  await login.evaluate(() => history.replaceState({}, '', '/me/'));
+  await login.waitForFunction(() => __messages.some(m => m.type === 'F4F_READY'));
+  await login.close(); checks++;
+  const timeout = await pageFor();
+  await install(timeout);
+  await timeout.evaluate(() => {
+    document.querySelector('[data-list="followers"]').remove();
+    return __dispatch({ type: 'F4F_ASSIST', runId: 'timeout' });
+  });
+  await timeout.evaluate(() => { const now = Date.now; Date.now = () => now() + 61000; });
+  await timeout.waitForFunction(() => __messages.some(m => m.reason === 'readiness_error'));
+  assert.equal(await timeout.evaluate(() => __messages.some(m => m.type === 'F4F_READY')), false);
+  await timeout.close(); checks++;
+  console.log('PASS: error is not completion, own-profile navigation, explicit identity fallback, login gating/resume and readiness timeout.');
 
   // Visual fixtures use the actual popup HTML/CSS/JS with a fake extension API.
   const server = createServer((req, res) => {
