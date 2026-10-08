@@ -26,7 +26,12 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     const scroll=document.createElement('div');scroll.style.cssText='height:100px;overflow-y:auto';
     const names=link.dataset.kind==='following'?['mutual','missing']:['mutual','fan'];
     for(const name of names){const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;scroll.append(row)}
-    dialog.append(close,scroll);document.body.append(dialog);
+    dialog.append(close,scroll);
+    if(link.dataset.kind==='followers'){
+      const placeholder=document.createElement('div');placeholder.setAttribute('role','dialog');
+      document.body.append(placeholder);
+      queueMicrotask(()=>{placeholder.replaceWith(dialog);window.__dialogReplacements=(window.__dialogReplacements||0)+1;});
+    }else document.body.append(dialog);
   }
   </script></body></html>`;
 // Browser-created tabs can navigate before Playwright attaches interception.
@@ -94,6 +99,8 @@ try {
   assert.deepEqual(operation.validation.followers, { expected: 2, collected: 2 });
   assert.deepEqual(operation.results.accounts, [{ name: 'missing', href: '/missing' }]);
   assert.equal(operation.tabId, instagramTab.id);
+  assert.equal(await instagram.evaluate(() => window.__dialogReplacements), 1);
+  assert.equal(await instagram.locator('[role="dialog"]').count(), 0);
   const tabs = await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.instagram.com/*' }));
   assert.equal(tabs.length, 1);
   assert.equal(tabs[0].active, true);
@@ -122,6 +129,7 @@ try {
   assert.deepEqual(workerErrors, []);
   console.log('PASS: real unpacked MV3 load, own-page Edit profile without sidebar, active tab reuse, popup-independent execution, localized modal close, genuine completion, session state on reopening and View Results without username input.');
   console.log('PASS: real local-storage appearance persistence, popup-to-content changes, Light overriding OS Dark, and live System mode without changing checker results.');
+  console.log('PASS: real isolated-world collection survives replacement of the opening Instagram dialog and closes its replacement.');
   // A separate run starts with no Instagram tabs and goes from home to own profile.
   await instagram.close();
   await worker.evaluate(() => chrome.storage.session.clear());

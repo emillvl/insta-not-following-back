@@ -3,7 +3,7 @@
 A Manifest V3 extension around the supplied F4F Checker browser script. The
 original checking file remains **byte-for-byte unchanged**. No server, API
 scraper, remote executable code, analytics or runtime dependencies are used.
-Version 1.0.4 uses the requested safer DOM collector with completion validation;
+Version 1.0.5 uses the requested safer DOM collector with completion validation;
 the original Set comparison and result construction are retained verbatim.
 
 ## Load and use
@@ -34,7 +34,7 @@ keeps the current white theme; **Dark** uses Instagram-style dark surfaces.
 The choice applies to the popup, results and status banner. It is saved locally
 across browser sessions and extension updates, separately from checking results.
 
-After updating the unpacked extension to **1.0.4**, click its Reload button on
+After updating the unpacked extension to **1.0.5**, click its Reload button on
 `chrome://extensions`, refresh the Instagram page, then select Start Checking.
 Refreshing replaces the previous content script and its stalled wait state.
 
@@ -47,6 +47,13 @@ scroll steps use a 200 ms cadence; loading responses can wake an adaptive wait
 immediately. When progress stalls, four bounded waits of 1.5, 3, 6 and 10 seconds
 allow recovery. Each list also has a 20-minute hard deadline. Dialog opening and
 closing have separate 15-second and 2.5-second limits.
+
+When Instagram replaces a dialog or its wrapper while rendering, collection
+keeps the accounts already captured and reattaches to the replacement. A missing
+dialog gets up to three seconds to return; four consecutive replacements without
+new accounts are allowed. Normal connected dialogs incur no recovery wait.
+An actual closure, repeated replacements without progress, navigation or the
+list deadline still stop checking without publishing an incomplete result.
 
 Completion requires collected following/follower totals to equal exact profile
 counts, with the profile totals checked again at the end. Rounded labels such as
@@ -77,8 +84,10 @@ snapshot: memberships can still change while the two lists are read.
   controls or nested count spans to their actual native click target. It also
   recognizes exact localized integer counts, rejecting rounded/ambiguous totals.
 - `collector.js` owns safer scrolling, mutation-based collection, adaptive waits,
-  bounded retries and count verification. One observer and one outstanding wait
-  serve each list. It caches the last mounted row to avoid repeated full-list
+  bounded retries and count verification. A row observer and an observer of
+  direct children of the dialog's ancestors detect rendering and replacement;
+  the latter does not observe the whole page subtree. One outstanding wait serves
+  each list. It caches the last mounted row to avoid repeated full-list
   queries while scrolling. Progress updates are limited to once per second,
   apart from list boundaries. Observers are disconnected and owned dialogs are
   closed on completion or failure.
@@ -194,7 +203,9 @@ The reference timing audit takes about 50 seconds on its fixed two-account fixtu
 actual browser timers, and compares the original anchor-clicking script against
 the adapted button-clicking script. It does not use your signed-in account.
 The collector suite exercises 1,000–10,000 accounts, virtual/recycled rows,
-delayed loading and incomplete scans with a virtual test clock. Its optional
+delayed loading, dialog/wrapper replacements and incomplete scans with a virtual
+test clock. Fixture scroll writes retain native geometry and trigger deterministic
+loading so browser paint scheduling cannot race the accelerated timers. Its optional
 real-timing flags compare the current collector with the original using actual
 browser timers. `--real-large --timing-only` runs the healthy 10,000-follower
 benchmark; `--real-timing` uses a small healthy fixture. These are local fixture

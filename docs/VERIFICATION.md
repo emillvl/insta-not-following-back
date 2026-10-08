@@ -1,5 +1,50 @@
 # Verification — 8 October 2026
 
+## Version 1.0.5 dialog replacement recovery
+
+The reported immediate "list was closed" error was reproduced by replacing
+the dialog node while a scan was active. Version 1.0.4 treated any disconnection
+of the initially selected node as a user closure. The screenshot alone does not
+establish the exact live DOM transition, but the same failure is confirmed in
+the local regression fixture before this fix.
+
+Collection now preserves pending rows, reconnects its observers to a replacement
+dialog and refreshes the scroll container. Direct-child observations of the
+dialog's ancestors wake an ongoing wait when the dialog or its wrapper is
+removed. They do not observe all page descendants. Recovery waits only run for
+a disconnected dialog: up to three seconds to return, at most four consecutive
+replacements without new accounts, with the existing list deadline still enforced.
+Genuine closure and exhausted recovery produce no completed or non-follower box.
+
+The collector suite passes **25 scenarios**. New coverage includes immediate
+dialog replacement, a 1.2-second render gap, an opening placeholder, replacement
+of an ancestor wrapper, and replacement midway through virtual-row collection.
+Every successful scan verified both counts and closed the replacement dialog.
+Permanent closure, a replacement beyond the three-second limit and repeated
+replacements without progress all stopped within the bounded recovery window.
+
+The real unpacked MV3 extension test also passes with an opening placeholder
+replaced from the page's world while collection runs in Chrome's isolated world.
+The verified result remains correct and the replacement dialog is closed.
+Existing navigation, theme, saved result and incomplete-scan integration checks
+pass. The **20 unit checks** and packaged static checks pass; original source,
+reference runner and comparison/output bytes remain unchanged.
+
+All **48 reference/navigation/theme browser checks** pass. The new unshortened
+10,000-follower healthy benchmark completes in **9,948 ms** versus **106,431 ms**
+for the original, with identical account results and summary. The current time
+remains approximately ten seconds, matching the previous healthy fixture result.
+This is local fixture performance evidence, not a live Instagram time guarantee.
+
+A first concurrent fixture run exposed a browser-paint race in the accelerated
+18-second loading test; an isolated rerun passed. The cumulative fixture now
+triggers loading deterministically on native scroll writes, as the virtual-row
+fixture already did, and the complete suite passes with that correction. Production
+retry timings were not changed to accommodate the fixture.
+
+Reload the extension and refresh Instagram before retrying version **1.0.5**.
+Authenticated live Instagram remains unverified by these local fixtures.
+
 ## Version 1.0.4 validated collection
 
 The user explicitly requested completion validation, safer collection and

@@ -20,7 +20,10 @@ export function collectorFixture(options = {}) {
     if(type==='followers'&&options.exactTitle)control.title=String(names.length);
     control.onclick=event=>{
       event.preventDefault();__clicks.push('open:'+type);
-      const dialog=document.createElement('div');dialog.setAttribute('role','dialog');
+      let dialog=document.createElement('div');dialog.setAttribute('role','dialog');
+      let host=document.body;
+      if(options.replaceWrapper){host=document.createElement('section');document.body.append(host);}
+      window.__listOpenedAt=Date.now();
       const close=document.createElement('button');close.setAttribute('aria-label','Close');
       close.onclick=()=>{__clicks.push('close:'+type);dialog.remove();
         if(type==='followers'&&options.changedCount)control.textContent=(names.length+1)+' followers';};
@@ -46,13 +49,14 @@ export function collectorFixture(options = {}) {
         let pending=false;
         Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
           scrollProperty.set.call(this,value);__scrolls++;
+          if(options.replaceAtScroll===__scrolls)replaceDialog();
           if(options.renderDelay){if(!pending){pending=true;setTimeout(()=>{render();pending=false},options.renderDelay)}}
           else render();
         }});
       }else{
         let loaded=Math.min(batch,names.length),busy=false;
         append(list,names.slice(0,loaded));
-        list.addEventListener('scroll',()=>{
+        const onScroll=()=>{
           __scrolls++;
           if(options.jumpClock){const original=Date.now;Date.now=()=>original()+21*60*1000;}
           if(busy||loaded>=names.length||list.scrollTop+list.clientHeight<list.scrollHeight-2)return;
@@ -68,9 +72,30 @@ export function collectorFixture(options = {}) {
             }else{append(list,names.slice(loaded,next));loaded=next;}
             __added++;busy=false;
           },options.delay??50);
-        });
+        };
+        // Accelerated clocks do not schedule browser paint/scroll events.
+        // Keep native geometry, but start fixture loading on the scroll write.
+        const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+        Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
+          scrollProperty.set.call(this,value);onScroll();
+        }});
       }
-      dialog.append(close,list);document.body.append(dialog);
+      function replaceDialog(){
+        const old=dialog;
+        if(options.replaceWrapper)host.remove();else old.remove();
+        setTimeout(()=>{
+          if(options.replaceWrapper){host=document.createElement('section');document.body.append(host);}
+          dialog=old.cloneNode(false);dialog.append(...old.childNodes);host.append(dialog);
+        },options.replacementGap??0);
+      }
+      dialog.append(close,list);
+      if(options.openingPlaceholder&&type==='followers'){
+        const placeholder=document.createElement('div');placeholder.setAttribute('role','dialog');
+        const spinner=document.createElement('div');spinner.setAttribute('role','progressbar');
+        spinner.style.height='8px';placeholder.append(spinner);host.append(placeholder);
+        setTimeout(()=>{placeholder.remove();setTimeout(()=>host.append(dialog),options.replacementGap??0)},100);
+      }else host.append(dialog);
+      if(options.replaceDialog&&type==='followers')for(let i=0;i<(options.replaceTimes??1);i++)setTimeout(replaceDialog,100+i*400);
       if(options.closeDuringLoad&&type==='followers')setTimeout(()=>dialog.remove(),500);
     };
   }
