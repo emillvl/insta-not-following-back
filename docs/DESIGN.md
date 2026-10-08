@@ -14,7 +14,7 @@ username form.
 
 Running shows an indeterminate ring, current collected counts, and the reminder
 to keep Instagram active. Counts above the displayed total are labelled with
-" profile shows " rather than treated as an error. Completion requires settled
+"profile shows" rather than treated as an error. Completion requires settled
 lists and enough collected accounts, including deactivated rows.
 
 Completed shows the original Turkish result fields, View Results, and Check

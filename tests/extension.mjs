@@ -1,5 +1,3 @@
-// Loads the real unpacked MV3 extension in an isolated temporary browser profile.
-// Browser traffic is intercepted; this never uses an authenticated Instagram account.
 import { createRequire } from 'node:module';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,8 +33,6 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     }else document.body.append(dialog);
   }
   </script></body></html>`;
-// Browser-created tabs can navigate before Playwright attaches interception.
-// Resolve Instagram to our local TLS fixture and block every other network host.
 const key = join(profile, 'fixture-key.pem');
 const cert = join(profile, 'fixture-cert.pem');
 const openssl = process.env.F4F_OPENSSL_PATH || (process.platform === 'win32' ?
@@ -63,11 +59,8 @@ try {
   worker.on('console', msg => { if (msg.type() === 'error') workerErrors.push(msg.text()); });
   const instagram = await context.newPage();
   await instagram.goto('https://www.instagram.com/me/');
-  // Screenshot regression: the own page has Edit profile but no usable sidebar.
   await instagram.evaluate(() => document.getElementById('sidebar').remove());
   const instagramTab = await worker.evaluate(async () => (await chrome.tabs.query({ url: 'https://www.instagram.com/*' }))[0]);
-  // Accelerate only test-world timers after the real declarative scripts loaded.
-  // Production code and its specified delays are left untouched on disk.
   await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, func: () => {
     const native = globalThis.setTimeout;
     globalThis.setTimeout = (fn, ms, ...args) => native(fn, 0, ...args);
@@ -78,6 +71,9 @@ try {
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   await popup.locator('#appearance').selectOption('dark');
   await popup.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'dark');
+  assert.equal(await popup.locator('.author').textContent(), 'By Emil Valiyev');
+  assert.ok(await popup.locator('.logo-dark').evaluate(img => img.complete && img.naturalWidth === 128));
+  assert.equal(await worker.evaluate(() => chrome.runtime.getManifest().action.default_icon['32']), 'icons/icon-32.png');
   await popup.locator('#start').click();
   try { await instagram.waitForSelector('[data-f4f-results]', { timeout: 15000 }); }
   catch (error) {
@@ -130,8 +126,8 @@ try {
   assert.deepEqual(workerErrors, []);
   console.log('PASS: real unpacked MV3 load, own-page Edit profile without sidebar, active tab reuse, popup-independent execution, localized modal close, genuine completion, session state on reopening and View Results without username input.');
   console.log('PASS: real local-storage appearance persistence, popup-to-content changes, Light overriding OS Dark, and live System mode without changing checker results.');
+  console.log('PASS: packaged extension icons, theme logo, and Emil Valiyev credit load in the real popup.');
   console.log('PASS: real isolated-world collection survives replacement of the opening Instagram dialog and closes its replacement.');
-  // A separate run starts with no Instagram tabs and goes from home to own profile.
   await instagram.close();
   await worker.evaluate(() => chrome.storage.session.clear());
   const newPopup = await context.newPage();
@@ -181,7 +177,6 @@ try {
   assert.deepEqual(operation.results.accounts, [{ name: 'missing', href: '/missing' }]);
   assert.match(operation.results.summary, /Takip Ettiğin: 4 \| Takipçi: 4/);
   console.log('PASS: real MV3 completion retains deactivated rows above displayed counts after settling.');
-  // A native list exposing fewer rows than its count must never publish a result.
   await createdPage.evaluate(() => { window.__includeDeactivated = false; document.querySelector('[data-kind="following"]').textContent = '3 following'; });
   await worker.evaluate(() => chrome.storage.session.clear());
   const incompletePopup = await context.newPage();

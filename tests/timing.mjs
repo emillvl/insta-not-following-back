@@ -1,4 +1,3 @@
-// Differential execution with real browser timers: no fast clock or shortened waits.
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
@@ -71,7 +70,6 @@ async function run(adapted) {
   return result;
 }
 try {
-  // Independent contexts execute concurrently, using actual timers in each page.
   const [baseline, adapted] = await Promise.all([run(false), run(true)]);
   for (const [name, result] of [['original', baseline], ['extension runner', adapted]]) {
     assert.deepEqual(result.errors, [], name);

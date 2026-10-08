@@ -1,5 +1,3 @@
-// Local browser fixtures only. No requests reach Instagram or a third party.
-// Set F4F_PLAYWRIGHT_PATH to a bundled playwright package when not installed locally.
 import { createRequire } from 'node:module';
 import { readFileSync, mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
@@ -130,9 +128,6 @@ try {
         }
         const control = document.createElement(kind === 'button' ? 'button' : 'div');
         if (kind === 'role-link') control.setAttribute('role', 'link');
-        // The following label reproduces the nested spans provided by the user;
-        // the follower count was provided alone, so include the visible label
-        // from the screenshot in its enclosing native control.
         control.innerHTML = type === 'following' ?
           '<span class="x1lliihq x1plvlek xryxfnj" dir="auto"><span class="x5n08af x1s688f"><span class="html-span xdj266r x14z9mp">104</span></span> following</span>' :
           '<span class="html-span xdj266r x14z9mp xat24cr">108</span> followers';
@@ -194,7 +189,6 @@ try {
   });
   await manual.waitForFunction(() => __messages.some(m => m.type === 'F4F_READY'));
   await manual.close(); checks++;
-  // Reproduce the screenshot: own profile with Edit profile, but no recognizable sidebar.
   for (const label of ['Edit profile', 'Profili düzenle']) {
     const own = await pageFor(native, 'Close', false, '/me');
     await own.evaluate(label => {
@@ -206,7 +200,6 @@ try {
     assert.deepEqual((await snapshot(own)).accounts.map(account => account.name), ['missing', 'later']);
     await own.close(); checks++;
   }
-  // Mobile/icon controls carry the label in an SVG instead of an avatar or text.
   const icon = await pageFor(native, 'Close', false, '/someone_else/');
   await install(icon);
   await icon.evaluate(() => {
@@ -215,7 +208,6 @@ try {
   });
   await icon.waitForURL('https://www.instagram.com/me/');
   await icon.close(); checks++;
-  // A button-only Profile action navigates through Instagram's own SPA handler.
   const buttonProfile = await pageFor(native, 'Close', false, '/explore/');
   await install(buttonProfile);
   await buttonProfile.evaluate(() => {
@@ -251,12 +243,11 @@ try {
   await timeout.close(); checks++;
   console.log('PASS: native Profile click without nav/avatar, own Edit profile regression, manual navigation after 15 seconds, icon/button controls, login gating/resume and readiness timeout.');
 
-  // Visual fixtures use the actual popup HTML/CSS/JS with a fake extension API.
   const server = createServer((req, res) => {
-    const name = req.url.split('/').pop();
-    if (!['popup.html', 'popup.css', 'theme.js', 'popup.js'].includes(name)) { res.writeHead(404); res.end(); return; }
-    res.setHeader('Content-Type', name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'application/javascript' : 'text/html');
-    res.end(file(name));
+    const name = req.url.split('?')[0].slice(1);
+    if (!['popup.html', 'popup.css', 'theme.js', 'popup.js', 'icons/logo-light-128.png', 'icons/icon-128.png'].includes(name)) { res.writeHead(404); res.end(); return; }
+    res.setHeader('Content-Type', name.endsWith('.png') ? 'image/png' : name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'application/javascript' : 'text/html');
+    res.end(readFileSync(`extension/${name}`));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
@@ -293,6 +284,11 @@ try {
         assert.equal(await visual.locator('#start').textContent(), 'Retry Checking');
       }
       assert.ok(await visual.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      assert.equal(await visual.locator('.author').textContent(), 'By Emil Valiyev');
+      assert.equal(await visual.locator('.author').evaluate(el => getComputedStyle(el).textAlign), 'right');
+      const logo = visual.locator(`.logo-${mode}`);
+      assert.equal(await logo.isVisible(), true);
+      assert.ok(await logo.evaluate(img => img.complete && img.naturalWidth === 128));
       const visibleButtons = await visual.locator('button:visible').all();
       for (const button of visibleButtons) {
         const box = await button.boundingBox();
@@ -302,7 +298,6 @@ try {
       checks++;
     }
     assert.equal(await visual.locator('input, form').count(), 0);
-    // System tracks OS changes live; explicit choices override them and survive reopening.
     await visual.emulateMedia({ colorScheme: 'light' });
     assert.equal(await visual.getAttribute('html', 'data-f4f-theme'), 'dark');
     await visual.reload();
@@ -341,7 +336,6 @@ try {
     assert.equal(await results.evaluate(() => document.body.style.cssText), nativeBody);
     assert.deepEqual(await results.evaluate(() => F4FBridge.output(document.querySelector('[data-f4f-results]'))), originalOutput);
     await results.screenshot({ path: 'artifacts/warning-dark-running.png' });
-    // A running banner and completed results are separate production states.
     await results.evaluate(() => { document.getElementById('f4f-warning').style.visibility = 'hidden'; });
     await results.screenshot({ path: 'artifacts/results-dark-desktop.png' });
     await results.setViewportSize({ width: 320, height: 640 });
@@ -353,7 +347,6 @@ try {
     await results.emulateMedia({ colorScheme: 'dark' });
     await results.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'dark');
     assert.equal(await results.getAttribute('#f4f-warning', 'data-f4f-theme'), 'dark');
-    // A storage failure must retain a verified list; invalid completion must hide it.
     await results.evaluate(async () => {
       chrome.runtime.sendMessage = async () => ({ status: 'error', reason: 'storage_error', message: 'The verified list is still on Instagram.' });
       await F4FBridge.finish(document.querySelector('[data-f4f-results]'), { verified: true });

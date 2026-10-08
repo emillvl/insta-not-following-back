@@ -1,4 +1,3 @@
-// Actual scroll geometry, local account data, and controllable list loading.
 export function collectorFixture(options = {}) {
   return `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <main><a href="/accounts/edit/">Edit profile</a><a href="/me/following/" data-list="following"></a>
@@ -52,8 +51,6 @@ export function collectorFixture(options = {}) {
             for(let i=0;i<values.length;i++){windowBox.children[i].href='/'+values[i]+'/';windowBox.children[i].textContent=values[i];}
           }else{windowBox.replaceChildren();append(windowBox,values);}
         };render();
-        // A deterministic virtualization renderer with native scroll geometry.
-        // This keeps browser paint scheduling separate from the virtual test clock.
         const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
         let pending=false;
         Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
@@ -78,14 +75,11 @@ export function collectorFixture(options = {}) {
             const next=Math.min(loaded+batch,names.length);spinner.remove();
             if(mode==='replace-container'){
               const replacement=list.cloneNode(false);append(replacement,names.slice(0,next));
-              // Replacement is fully loaded so selection must be recovered, not reused.
               append(replacement,names.slice(next));list.replaceWith(replacement);list=replacement;loaded=names.length;
             }else{append(list,names.slice(loaded,next));loaded=next;}
             __added++;busy=false;
           },options.delay??50);
         };
-        // Accelerated clocks do not schedule browser paint/scroll events.
-        // Keep native geometry, but start fixture loading on the scroll write.
         const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
         Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
           scrollProperty.set.call(this,value);onScroll();

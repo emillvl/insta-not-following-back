@@ -15,8 +15,18 @@ const manifest = JSON.parse(readFileSync('extension/manifest.json', 'utf8'));
 assert.equal(manifest.manifest_version, 3);
 assert.deepEqual(manifest.permissions, ['storage', 'scripting']);
 assert.deepEqual(manifest.host_permissions, ['https://www.instagram.com/*', 'https://instagram.com/*']);
+for (const size of [16, 32, 48, 128]) {
+  const path = manifest.icons?.[size];
+  assert.ok(path, `missing ${size}px extension icon`);
+  const png = readFileSync(`extension/${path}`);
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(png.readUInt32BE(16), size);
+  assert.equal(png.readUInt32BE(20), size);
+  if (size !== 128) assert.equal(manifest.action.default_icon?.[size], path);
+}
 const files = [manifest.action.default_popup, manifest.background.service_worker,
-  ...manifest.content_scripts.flatMap(entry => entry.js), 'collector.js', 'adapter.js', 'checker-runner.js', 'safe-runner.js', 'popup.css', 'popup.js'];
+  ...manifest.content_scripts.flatMap(entry => entry.js), 'collector.js', 'adapter.js', 'checker-runner.js', 'safe-runner.js', 'popup.css', 'popup.js',
+  'icons/logo-light-128.png', 'icons/logo-512.png', 'icons/logo-1024.png'];
 for (const file of files) readFileSync(`extension/${file}`);
 for (const file of readdirSync('extension').filter(name => name.endsWith('.js'))) {
   const result = spawnSync(process.execPath, ['--check', `extension/${file}`], { encoding: 'utf8' });
