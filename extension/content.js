@@ -68,7 +68,7 @@
     if (!document.getElementById('f4f-result-style')) {
       const style = document.createElement('style');
       style.id = 'f4f-result-style';
-      style.textContent = '[data-f4f-results] a:hover{background:#faf5fc}[data-f4f-results] :focus-visible{outline:3px solid #833AB4;outline-offset:2px}';
+      style.textContent = '[data-f4f-results] a:hover{background:#faf5fc}[data-f4f-results]:focus-visible,[data-f4f-results] :focus-visible{outline:3px solid #833AB4;outline-offset:2px}';
       document.head.appendChild(style);
     }
   }

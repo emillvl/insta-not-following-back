@@ -16,7 +16,7 @@ function serialized(task) {
   return result;
 }
 function fromPopup(sender) {
-  return !sender.tab && sender.url === chrome.runtime.getURL('popup.html');
+  return sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('popup.html');
 }
 function fromPage(sender, operation, message) {
   return sender.frameId === 0 && sender.tab?.id === operation.tabId &&

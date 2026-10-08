@@ -23,6 +23,7 @@ globalThis.F4FSelectors = (() => {
     const labels = new Set(profileLabels.map(normalize));
     const candidates = new Set();
     for (const link of document.querySelectorAll('a[href]')) {
+      if (!link.closest('nav, aside, [role="navigation"]')) continue;
       if (!link.querySelector('img')) continue;
       const texts = [link.getAttribute('aria-label'), link.getAttribute('title'), link.textContent,
         ...Array.from(link.querySelectorAll('[aria-label]'), el => el.getAttribute('aria-label'))];
