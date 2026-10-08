@@ -70,6 +70,8 @@ try {
   await outside.goto('https://youtube.com/');
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await popup.locator('#appearance').selectOption('dark');
+  await popup.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'dark');
   await popup.locator('#start').click();
   try { await instagram.waitForSelector('[data-f4f-results]', { timeout: 15000 }); }
   catch (error) {
@@ -98,12 +100,26 @@ try {
   await reopened.locator('#view').waitFor({ state: 'visible' });
   assert.equal(await reopened.locator('input, form').count(), 0);
   assert.match(await reopened.locator('#title').textContent(), /Checking Complete/);
+  assert.equal(await reopened.locator('#appearance').inputValue(), 'dark');
+  await instagram.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'dark');
+  assert.equal(await instagram.locator('[data-f4f-results]').evaluate(box => getComputedStyle(box).backgroundColor), 'rgb(12, 16, 20)');
+  await reopened.locator('#appearance').selectOption('light');
+  await instagram.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'light');
+  await reopened.emulateMedia({ colorScheme: 'dark' });
+  await instagram.emulateMedia({ colorScheme: 'dark' });
+  assert.equal(await reopened.getAttribute('html', 'data-f4f-theme'), 'light');
+  assert.equal(await instagram.getAttribute('[data-f4f-results]', 'data-f4f-theme'), 'light');
+  await reopened.locator('#appearance').selectOption('system');
+  await reopened.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'dark');
+  await instagram.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'dark');
+  assert.deepEqual(await worker.evaluate(async () => (await chrome.storage.session.get('operation')).operation.results), operation.results);
   await instagram.locator('#closeF4FBox').click();
   await reopened.locator('#view').click();
   await instagram.waitForSelector('[data-f4f-results]');
   assert.deepEqual(await instagram.locator('[data-f4f-results] li a').allTextContents(), ['missing']);
   assert.deepEqual(workerErrors, []);
   console.log('PASS: real unpacked MV3 load, own-page Edit profile without sidebar, active tab reuse, popup-independent execution, localized modal close, genuine completion, session state on reopening and View Results without username input.');
+  console.log('PASS: real local-storage appearance persistence, popup-to-content changes, Light overriding OS Dark, and live System mode without changing checker results.');
   // A separate run starts with no Instagram tabs and goes from home to own profile.
   await instagram.close();
   await worker.evaluate(() => chrome.storage.session.clear());

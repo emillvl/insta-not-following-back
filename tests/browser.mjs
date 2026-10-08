@@ -42,7 +42,9 @@ function fixture(data, label, broken = false) {
   window.__messages=[];window.__listeners=[];
   window.chrome={runtime:{id:'test',onMessage:{addListener:fn=>__listeners.push(fn)},sendMessage:async msg=>{
     __messages.push(msg);return msg.type==='F4F_FINISHED'?{status:'completed'}:{ok:true}
-  }}};
+  }},storage:{local:{get:async()=>({appearance:window.__appearance||'system'}),set:async data=>{
+    window.__appearance=data.appearance;for(const fn of window.__themeListeners)fn({appearance:{newValue:data.appearance}},'local')
+  }},onChanged:{addListener:fn=>window.__themeListeners.push(fn)}}};window.__themeListeners=[];
   window.__dispatch=msg=>new Promise(resolve=>{for(const fn of __listeners)fn(msg,{id:'test'},resolve)});
   </script></body></html>`;
 }
@@ -53,6 +55,7 @@ async function pageFor(data = native, label = 'Close', broken = false, path = '/
   return page;
 }
 async function install(page) {
+  await page.addScriptTag({ content: file('theme.js') });
   await page.addScriptTag({ content: file('localization.js') });
   await page.addScriptTag({ content: file('list-controls.js') });
   await page.addScriptTag({ content: file('content.js') });
@@ -251,7 +254,7 @@ try {
   // Visual fixtures use the actual popup HTML/CSS/JS with a fake extension API.
   const server = createServer((req, res) => {
     const name = req.url.split('/').pop();
-    if (!['popup.html', 'popup.css', 'popup.js'].includes(name)) { res.writeHead(404); res.end(); return; }
+    if (!['popup.html', 'popup.css', 'theme.js', 'popup.js'].includes(name)) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'application/javascript' : 'text/html');
     res.end(file(name));
   });
@@ -261,20 +264,27 @@ try {
     const errors = [];
     visual.on('pageerror', error => errors.push(error.message));
     await visual.addInitScript(() => {
-      window.__state = { status: 'idle' }; window.__sent = []; window.__storageListener = null;
+      window.__state = { status: 'idle' }; window.__sent = []; window.__storageListeners = [];
       window.chrome = { runtime: { sendMessage: async msg => { __sent.push(msg); return __state; } },
-        storage: { onChanged: { addListener: fn => { __storageListener = fn; } } } };
-      window.__render = state => { __state = state; __storageListener({ operation: { newValue: state } }, 'session'); };
+        storage: { local: { get: async () => ({ appearance: localStorage.getItem('appearance') || 'system' }),
+          set: async data => {
+            localStorage.setItem('appearance', data.appearance);
+            for (const fn of __storageListeners) fn({ appearance: { newValue: data.appearance } }, 'local');
+          } }, onChanged: { addListener: fn => { __storageListeners.push(fn); } } } };
+      window.__render = state => { __state = state; for (const fn of __storageListeners) fn({ operation: { newValue: state } }, 'session'); };
     });
     await visual.goto(`http://127.0.0.1:${server.address().port}/popup.html`);
-    for (const state of [
+    const states = [
       { status: 'idle', message: 'Ready' },
       { status: 'running', message: 'Checking following, then followers…' },
       { status: 'completed', message: 'Checking Complete', results: { heading: 'Seni Takip Etmeyenler (2)', summary: 'Takip Ettiğin: 4 | Takipçi: 2', accounts: [] } },
       { status: 'error', message: 'Instagram was reloaded. Please retry.' },
       { status: 'waiting', reason: 'waiting_profile', message: 'Waiting for Instagram’s Profile control…' },
       { status: 'waiting', reason: 'login_required', message: 'Log in to Instagram in this tab. Checking will continue after login.' }
-    ]) {
+    ];
+    for (const mode of ['light', 'dark']) for (const state of states) {
+      await visual.locator('#appearance').selectOption(mode);
+      await visual.waitForFunction(mode => document.documentElement.getAttribute('data-f4f-theme') === mode, mode);
       await visual.evaluate(state => __render(state), state);
       assert.ok(await visual.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       const visibleButtons = await visual.locator('button:visible').all();
@@ -282,10 +292,22 @@ try {
         const box = await button.boundingBox();
         assert.ok(box.x >= 0 && box.x + box.width <= 360 && box.height >= 44);
       }
-      await visual.screenshot({ path: `artifacts/popup-${state.reason || state.status}.png`, fullPage: true });
+      await visual.screenshot({ path: `artifacts/popup-${mode === 'dark' ? 'dark-' : ''}${state.reason || state.status}.png`, fullPage: true });
       checks++;
     }
     assert.equal(await visual.locator('input, form').count(), 0);
+    // System tracks OS changes live; explicit choices override them and survive reopening.
+    await visual.emulateMedia({ colorScheme: 'light' });
+    assert.equal(await visual.getAttribute('html', 'data-f4f-theme'), 'dark');
+    await visual.reload();
+    await visual.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'dark');
+    assert.equal(await visual.locator('#appearance').inputValue(), 'dark');
+    await visual.locator('#appearance').selectOption('system');
+    await visual.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'light');
+    await visual.emulateMedia({ colorScheme: 'dark' });
+    await visual.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'dark');
+    assert.equal(await visual.locator('#appearance').inputValue(), 'system');
+    await visual.evaluate(() => __render({ status: 'waiting', reason: 'login_required', message: 'Log in to Instagram.' }));
     await visual.locator('#continue').click();
     assert.ok(await visual.evaluate(() => __sent.some(msg => msg.type === 'F4F_CONTINUE' && !('username' in msg))));
     assert.deepEqual(errors, []);
@@ -304,8 +326,29 @@ try {
     await results.evaluate(() => F4FBridge.warning('running'));
     await results.setViewportSize({ width: 1200, height: 800 });
     await results.screenshot({ path: 'artifacts/warning-running.png' });
+    const originalOutput = await results.evaluate(() => F4FBridge.output(document.querySelector('[data-f4f-results]')));
+    const nativeBody = await results.evaluate(() => document.body.style.cssText);
+    await results.evaluate(() => F4FTheme.setPreference('dark'));
+    assert.equal(await results.getAttribute('[data-f4f-results]', 'data-f4f-theme'), 'dark');
+    assert.equal(await results.locator('[data-f4f-results]').evaluate(box => getComputedStyle(box).backgroundColor), 'rgb(12, 16, 20)');
+    assert.equal(await results.locator('#f4f-warning').evaluate(host => getComputedStyle(host).color), 'rgb(245, 245, 245)');
+    assert.equal(await results.evaluate(() => document.body.style.cssText), nativeBody);
+    assert.deepEqual(await results.evaluate(() => F4FBridge.output(document.querySelector('[data-f4f-results]'))), originalOutput);
+    await results.screenshot({ path: 'artifacts/warning-dark-running.png' });
+    // A running banner and completed results are separate production states.
+    await results.evaluate(() => { document.getElementById('f4f-warning').style.visibility = 'hidden'; });
+    await results.screenshot({ path: 'artifacts/results-dark-desktop.png' });
+    await results.setViewportSize({ width: 320, height: 640 });
+    await results.screenshot({ path: 'artifacts/results-dark-narrow.png' });
+    await results.evaluate(() => { document.getElementById('f4f-warning').style.visibility = ''; });
+    await results.evaluate(() => F4FTheme.setPreference('system'));
+    await results.emulateMedia({ colorScheme: 'light' });
+    await results.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'light');
+    await results.emulateMedia({ colorScheme: 'dark' });
+    await results.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'dark');
+    assert.equal(await results.getAttribute('#f4f-warning', 'data-f4f-theme'), 'dark');
     await results.close(); checks++;
-    console.log('PASS: six popup state renders, login continuation with no username form, result links/close, responsive result bounds and warning screenshots.');
+    console.log('PASS: twelve popup state renders, persisted overrides, live System theme, themed results/banner without changing page or output, login continuation, responsive bounds and screenshots.');
   } finally { server.close(); }
   console.log(`Browser fixture checks passed: ${checks}. Actual authenticated Instagram remains a manual test.`);
 } finally { await browser.close(); }

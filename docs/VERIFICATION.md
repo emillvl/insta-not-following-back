@@ -1,5 +1,28 @@
 # Verification — 8 October 2026
 
+## Version 1.0.3 appearance choices
+
+System, Light and Dark are available in every popup state. System is the default
+and follows live `prefers-color-scheme` changes. Explicit choices are saved in
+local extension storage and apply to the popup, results and shadow-root banner.
+Only extension surfaces receive theme variables; native Instagram styles,
+operation state, results and original checker bytes remain unchanged.
+
+The 16 automated tests and static checks passed again. Browser fixtures now
+include twelve popup renders (six states in both themes), saved Dark on reopening,
+an explicit override of OS Light, live System changes in both directions, and
+light/dark results and banner updates with unchanged output and native page
+styles. **44 browser fixture checks passed.** Light/dark popup and narrow dark
+results screenshots were visually inspected for layout and readability.
+
+The real unpacked MV3 test also passed: selecting Dark in the popup propagates
+through actual local-storage events to content-script results, reopening retains
+the choice, explicit Light overrides emulated OS Dark, and System changes both
+popup and results to Dark without changing stored results. Normal checking,
+popup closure, View Results and new-tab Profile navigation still pass. Browser
+tests use local fixtures in temporary Edge profiles. The previous real timing
+audit remains applicable; no checker or timer code changed in this version.
+
 ## Version 1.0.2 selector compatibility and real timing audit
 
 The next screenshot reported a readiness error even though profile counts were
@@ -51,7 +74,7 @@ the fix, so the previous page script and stalled session are replaced.
   referenced manifest assets, Manifest V3, exact restricted permissions, JavaScript
   syntax, absence of remote script/eval/Function/network clients and inline popup
   handlers. The original checksum is also confirmed in the committed Git blob.
-- `npm run test:browser`: **38 fixture checks passed** in headless Edge.
+- `npm run test:browser`: **44 fixture checks passed** in headless Edge.
   Six full-script differential runs compare original versus extension outputs,
   counts, account fields, ordering, click sequence and requested timer values for
   English and Turkish. Inputs exercise duplicates, list snapshots, reserved-name
@@ -65,10 +88,12 @@ the fix, so the previous page script and stalled session are replaced.
   Profile-control clicks without nav/avatar assumptions, Edit profile detection
   in English/Turkish, slashless profile paths, manual navigation after the old
   15-second cutoff, icon/button-only Profile controls, login gating/resume and
-  readiness timeout pass. Six actual popup state renders and login continuation
+  readiness timeout pass. Twelve actual popup state renders and login continuation
   pass; no username form is present or submitted.
   Original close and profile-link fields are exercised. Desktop/narrow results,
   popup width/button bounds and warning selector/click isolation pass.
+  Saved appearance overrides, live system changes, popup/result/banner themes
+  and unchanged native page styles and original results also pass.
 - `npm run test:extension`: passed with the real unpacked MV3 extension in a
   temporary Edge profile, using actual Chrome-compatible APIs and isolated-world
   DOM execution. Reproduces an own page with Edit profile and no usable sidebar,

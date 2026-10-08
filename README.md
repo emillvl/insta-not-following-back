@@ -26,7 +26,13 @@ result with count zero, not an error. Check Again runs the original checker
 again. Reloading/navigating away from the checking page or closing that tab
 reports interruption; the extension does not silently restart it.
 
-After updating the unpacked extension to **1.0.2**, click its Reload button on
+Choose **Appearance** in the popup: **System** (the default) follows your computer's
+preferred light/dark mode and updates automatically when it changes; **Light**
+keeps the current white theme; **Dark** uses Instagram-style dark surfaces.
+The choice applies to the popup, results and status banner. It is saved locally
+across browser sessions and extension updates, separately from checking results.
+
+After updating the unpacked extension to **1.0.3**, click its Reload button on
 `chrome://extensions`, refresh the Instagram page, then select Start Checking.
 Refreshing replaces the previous content script and its stalled wait state.
 
@@ -62,6 +68,10 @@ Refreshing replaces the previous content script and its stalled wait state.
 - `popup.html`, `popup.css` and `popup.js` show idle, navigating, waiting, running,
   completed and error states, including normal Instagram login recovery. They use
   indeterminate indicators, never fabricated percentages.
+- `theme.js` shares light/dark color tokens across extension surfaces, listens
+  for system appearance and local preference changes, and saves `appearance` in
+  `chrome.storage.local`. Its page styles are scoped to the extension's results
+  and shadow-root banner; Instagram's own appearance setting is unaffected.
 - Operation state and original rendered output are held in `chrome.storage.session`.
   Reopening the popup or worker suspension does not erase them. Session data
   clears on browser restart, extension reload/update or disable. Results can be
@@ -112,7 +122,7 @@ translations; universal language compatibility is not claimed.
 
 The 360px popup uses explicit purple/pink/orange/yellow design tokens, readable
 type, focused actions and accessible focus states. The original results box is
-restyled in place with a white surface, purple links, responsive width and a
+restyled in place with a themed surface, purple links, responsive width and a
 scrollable account list. Counts, field text, ordering, close and profile actions
 are preserved. There were no original sort, filter or export controls to remove.
 See [DESIGN.md](docs/DESIGN.md) for the design contract.
@@ -191,6 +201,7 @@ Added extension files:
 - `extension/content.js`
 - `extension/localization.js`
 - `extension/list-controls.js`
+- `extension/theme.js`
 - `extension/adapter.js`
 - `extension/checker-runner.js` (generated, contains original bytes)
 - `extension/popup.html`
