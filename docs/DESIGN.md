@@ -9,6 +9,11 @@ uses Instagram's native Profile control and automatically continues on the own
 profile page. There is no username form. No invented percentages or additional
 account categories.
 
+Validated collection shows actual collected/expected counts in the existing
+running message, without percentages. Stalls, mismatched counts and missing exact
+totals show an Incomplete scan error with Retry Checking. Unverified negative
+results are not shown. Completion requires both lists to match their exact totals.
+
 Tokens: white #FFFFFF, near-black #121212, light gray #F5F5F5, purple #833AB4,
 pink #C13584, magenta #E1306C, orange #F77737, yellow #FCAF45. Use dark purple
 for legible primary buttons and the gradient for decorative accents. System

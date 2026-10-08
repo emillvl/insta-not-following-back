@@ -279,6 +279,7 @@ try {
       { status: 'running', message: 'Checking following, then followers…' },
       { status: 'completed', message: 'Checking Complete', results: { heading: 'Seni Takip Etmeyenler (2)', summary: 'Takip Ettiğin: 4 | Takipçi: 2', accounts: [] } },
       { status: 'error', message: 'Instagram was reloaded. Please retry.' },
+      { status: 'error', reason: 'incomplete_scan', message: 'Incomplete followers scan: collected 250 of 10000. Retry checking; no non-followers were confirmed.' },
       { status: 'waiting', reason: 'waiting_profile', message: 'Waiting for Instagram’s Profile control…' },
       { status: 'waiting', reason: 'login_required', message: 'Log in to Instagram in this tab. Checking will continue after login.' }
     ];
@@ -286,6 +287,11 @@ try {
       await visual.locator('#appearance').selectOption(mode);
       await visual.waitForFunction(mode => document.documentElement.getAttribute('data-f4f-theme') === mode, mode);
       await visual.evaluate(state => __render(state), state);
+      if (state.reason === 'incomplete_scan') {
+        assert.equal(await visual.locator('#title').textContent(), 'Incomplete scan');
+        assert.equal(await visual.locator('#view').isVisible(), false);
+        assert.equal(await visual.locator('#start').textContent(), 'Retry Checking');
+      }
       assert.ok(await visual.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       const visibleButtons = await visual.locator('button:visible').all();
       for (const button of visibleButtons) {
@@ -347,8 +353,22 @@ try {
     await results.emulateMedia({ colorScheme: 'dark' });
     await results.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'dark');
     assert.equal(await results.getAttribute('#f4f-warning', 'data-f4f-theme'), 'dark');
+    // A storage failure must retain a verified list; invalid completion must hide it.
+    await results.evaluate(async () => {
+      chrome.runtime.sendMessage = async () => ({ status: 'error', reason: 'storage_error', message: 'The verified list is still on Instagram.' });
+      await F4FBridge.finish(document.querySelector('[data-f4f-results]'), { verified: true });
+    });
+    assert.equal(await results.locator('[data-f4f-results]').count(), 1);
+    assert.deepEqual(await results.evaluate(() => F4FBridge.output(document.querySelector('[data-f4f-results]'))), originalOutput);
+    checks++;
+    await results.evaluate(async () => {
+      chrome.runtime.sendMessage = async () => ({ status: 'error', reason: 'incomplete_scan', message: 'The scan could not be verified.' });
+      await F4FBridge.finish(document.querySelector('[data-f4f-results]'), { verified: true });
+    });
+    assert.equal(await results.locator('[data-f4f-results]').count(), 0);
+    checks++;
     await results.close(); checks++;
-    console.log('PASS: twelve popup state renders, persisted overrides, live System theme, themed results/banner without changing page or output, login continuation, responsive bounds and screenshots.');
+    console.log('PASS: fourteen popup state renders, Incomplete scan recovery, persisted overrides, live System theme, themed results/banner without changing page or output, login continuation, responsive bounds and screenshots.');
   } finally { server.close(); }
   console.log(`Browser fixture checks passed: ${checks}. Actual authenticated Instagram remains a manual test.`);
 } finally { await browser.close(); }

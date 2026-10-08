@@ -15,8 +15,8 @@ const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="sidebar"><a href="/me/"><span>Profile</span></a></div>
   <main><a id="edit" href="/accounts/edit/">Edit profile</a>
-  <button data-kind="following"><span dir="auto"><span><span class="html-span">104</span></span> following</span></button>
-  <div role="button" data-kind="followers"><span class="html-span">108</span> followers</div>
+  <button data-kind="following"><span dir="auto"><span><span class="html-span">2</span></span> following</span></button>
+  <div role="button" data-kind="followers"><span class="html-span">2</span> followers</div>
   </main>
   <script>
   if(!['/me','/me/'].includes(location.pathname))document.getElementById('edit').remove();
@@ -90,6 +90,8 @@ try {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.equal(operation.status, 'completed');
+  assert.equal(operation.validation.verified, true);
+  assert.deepEqual(operation.validation.followers, { expected: 2, collected: 2 });
   assert.deepEqual(operation.results.accounts, [{ name: 'missing', href: '/missing' }]);
   assert.equal(operation.tabId, instagramTab.id);
   const tabs = await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.instagram.com/*' }));
@@ -150,5 +152,27 @@ try {
   assert.equal(operation.status, 'completed');
   assert.equal((await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.instagram.com/*' }))).length, 1);
   console.log('PASS: no existing Instagram tab → one foreground tab → own profile → automatic checking and completion with no second Start.');
+  // A native list exposing fewer rows than its count must never publish a result.
+  const createdPage = context.pages().find(page => page.url() === 'https://www.instagram.com/me/');
+  await createdPage.evaluate(() => { document.querySelector('[data-kind="following"]').textContent = '3 following'; });
+  await worker.evaluate(() => chrome.storage.session.clear());
+  const incompletePopup = await context.newPage();
+  await incompletePopup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await incompletePopup.locator('#start').click();
+  const errorDeadline = Date.now() + 10000;
+  while (Date.now() < errorDeadline) {
+    operation = await worker.evaluate(async () => (await chrome.storage.session.get('operation')).operation);
+    if (operation?.status === 'error') break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(operation.status, 'error');
+  assert.equal(operation.reason, 'incomplete_scan');
+  assert.equal(operation.results, undefined);
+  assert.equal(await createdPage.locator('[data-f4f-results]').count(), 0);
+  const errorView = await context.newPage();
+  await errorView.goto(`chrome-extension://${extensionId}/popup.html`);
+  await errorView.locator('#title').filter({ hasText: 'Incomplete scan' }).waitFor();
+  assert.equal(await errorView.locator('#view').isVisible(), false);
+  console.log('PASS: real MV3 incomplete list → retryable Incomplete scan, no View Results and no false non-follower box.');
   console.log('Isolated browser profile retained in the temporary directory; no signed-in profile was used.');
 } finally { await context.close(); server.close(); }

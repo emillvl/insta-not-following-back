@@ -3,6 +3,8 @@
 A Manifest V3 extension around the supplied F4F Checker browser script. The
 original checking file remains **byte-for-byte unchanged**. No server, API
 scraper, remote executable code, analytics or runtime dependencies are used.
+Version 1.0.4 uses the requested safer DOM collector with completion validation;
+the original Set comparison and result construction are retained verbatim.
 
 ## Load and use
 
@@ -22,7 +24,7 @@ scraper, remote executable code, analytics or runtime dependencies are used.
 
 The results retain the original Turkish field labels, list order, category
 count and following/follower totals. An empty list is a successful original
-result with count zero, not an error. Check Again runs the original checker
+result with count zero, not an error. Check Again runs the validated collector
 again. Reloading/navigating away from the checking page or closing that tab
 reports interruption; the extension does not silently restart it.
 
@@ -32,9 +34,28 @@ keeps the current white theme; **Dark** uses Instagram-style dark surfaces.
 The choice applies to the popup, results and status banner. It is saved locally
 across browser sessions and extension updates, separately from checking results.
 
-After updating the unpacked extension to **1.0.3**, click its Reload button on
+After updating the unpacked extension to **1.0.4**, click its Reload button on
 `chrome://extensions`, refresh the Instagram page, then select Start Checking.
 Refreshing replaces the previous content script and its stalled wait state.
+
+## Complete and incomplete scans
+
+The checker captures rows before scrolling and observes new, removed and recycled
+rows as Instagram renders them. It moves only through already captured rows,
+waiting for further rendering before advancing into an unseen section. Normal
+scroll steps use a 200 ms cadence; loading responses can wake an adaptive wait
+immediately. When progress stalls, four bounded waits of 1.5, 3, 6 and 10 seconds
+allow recovery. Each list also has a 20-minute hard deadline. Dialog opening and
+closing have separate 15-second and 2.5-second limits.
+
+Completion requires collected following/follower totals to equal exact profile
+counts, with the profile totals checked again at the end. Rounded labels such as
+`10K` are never treated as exact; an exact title/accessibility value can supply
+the real number. Missing exact counts, changed totals, stalls, closed lists and
+deadline failures produce a retryable error without publishing non-followers.
+Real collected counts appear in the popup while checking, without invented
+percentages. Matching totals are a consistency check, not proof of an atomic
+snapshot: memberships can still change while the two lists are read.
 
 ## Architecture and navigation
 
@@ -53,17 +74,20 @@ Refreshing replaces the previous content script and its stalled wait state.
   deadline; it no longer stops at 15 seconds. These waits are outside the checker.
 - `list-controls.js` keeps the exact original relative links first, accepts
   equivalent absolute/slashless list hrefs and binds labelled buttons, role
-  controls or nested count spans to their actual native click target. Only the
-  original top-level list-opening selector receives this compatibility wrapper.
-  Account collection inside dialogs remains unchanged, with the original waits,
-  retries and eight-stable-pass stopping condition.
+  controls or nested count spans to their actual native click target. It also
+  recognizes exact localized integer counts, rejecting rounded/ambiguous totals.
+- `collector.js` owns safer scrolling, mutation-based collection, adaptive waits,
+  bounded retries and count verification. One observer and one outstanding wait
+  serve each list. It caches the last mounted row to avoid repeated full-list
+  queries while scrolling. Progress updates are limited to once per second,
+  apart from list boundaries. Observers are disconnected and owned dialogs are
+  closed on completion or failure.
 - The worker claims the ready page, records **running**, then injects packaged
-  `adapter.js` and `checker-runner.js` into Chrome's default **isolated content
+  `collector.js`, `adapter.js` and `safe-runner.js` into Chrome's default **isolated content
   script world**. They operate on the real Instagram DOM and click its controls;
-  they need no Instagram JavaScript globals. The original collector's timers,
-  retries and scrolling execute in that page's environment.
-- `adapter.js` awaits the original async IIFE, captures its original alert as an
-  extension error, and requires its genuine results box before completion.
+  they need no Instagram JavaScript globals.
+- `adapter.js` awaits execution, captures alerts as extension errors, and requires
+  both the result box and verified collection evidence before completion.
   Injection and profile navigation never count as successful checking.
 - `popup.html`, `popup.css` and `popup.js` show idle, navigating, waiting, running,
   completed and error states, including normal Instagram login recovery. They use
@@ -90,8 +114,11 @@ and [session-storage model](https://developer.chrome.com/docs/extensions/referen
 [ALGORITHM.md](docs/ALGORITHM.md) records every original selector, delay, retry,
 scroll loop, comparison and output field. The original SHA-256 is
 `6b21281d11d84690d2bbf993b3ac3c0ba6c64cd38bfb4e5dc897443752ee9d23`.
-The build embeds its entire byte sequence in the packaged runner, without
-rewriting or extracting its functions. The original is still usable standalone.
+The build embeds its entire byte sequence in `checker-runner.js`, retained as a
+reference. It also generates `safe-runner.js`, delegating only list opening,
+collection and closure to the new collector. The original comparison/output
+tail remains byte-for-byte intact in both runners. The original source is still
+usable standalone; the extension now injects the validated runner.
 
 The baseline Git commit initially normalized CRLF to LF because Git's existing
 configuration enabled automatic line-ending conversion. `.gitattributes` now
@@ -101,12 +128,12 @@ edited. A raw baseline diff therefore shows line endings; the baseline diff
 with `--ignore-space-at-eol` is empty. The committed original now has the exact
 supplied SHA-256 and will retain it on future checkouts.
 
-All production changes are in separate integration/presentation files. The
-lexical document adapter adds Close-label fallbacks and native list-control
-recognition when an original selector fails. Its wrappers retain native DOM
-clicks and do not modify account collection. The lexical alert adapter routes the existing error to status
-and the banner instead of a blocking alert. These are interface changes; the
-collection, comparison, filtering, categorization and timing remain unchanged.
+The collection/timing changes in 1.0.4 implement the user's explicit request for
+safer collection, adaptive waits and validation. Earlier conversion versions
+preserved all original scrolling and timing; the reference runner still does.
+The current collector preserves username extraction, case sensitivity, the two
+original reserved-name exclusions and Set insertion order. Comparison, category
+and result fields are unchanged. Native DOM controls are still used throughout.
 
 ## Language recognition and design
 
@@ -152,6 +179,8 @@ package and installed Edge; they add no production dependencies:
 npm run test:browser
 npm run test:extension
 npm run test:timing
+npm run test:collector
+npm run test:collector -- --real-large --timing-only
 ```
 
 If Playwright is bundled elsewhere, set `F4F_PLAYWRIGHT_PATH` to that package
@@ -161,9 +190,15 @@ defaults to Git for Windows' bundled OpenSSL). It creates a temporary profile
 and a temporary local TLS certificate, maps Instagram to a local fixture server
 and blocks other network hosts. It does not use your regular browser profile.
 Temporary integration profiles are left in the system temporary directory.
-The timing audit takes about 50 seconds on its fixed two-account fixture, uses
+The reference timing audit takes about 50 seconds on its fixed two-account fixture, uses
 actual browser timers, and compares the original anchor-clicking script against
 the adapted button-clicking script. It does not use your signed-in account.
+The collector suite exercises 1,000–10,000 accounts, virtual/recycled rows,
+delayed loading and incomplete scans with a virtual test clock. Its optional
+real-timing flags compare the current collector with the original using actual
+browser timers. `--real-large --timing-only` runs the healthy 10,000-follower
+benchmark; `--real-timing` uses a small healthy fixture. These are local fixture
+measurements, not promised live Instagram completion times.
 
 See [VERIFICATION.md](docs/VERIFICATION.md) for actual test results and the
 remaining authenticated-Chrome checklist. Visual snapshots are saved locally
@@ -176,10 +211,10 @@ in ignored `artifacts/`; fixture examples are labelled as test content.
 - Tab-switch throttling depends on Chrome and the live page. The state-only
   test verifies no restart or false completion; it does not establish uninterrupted
   background collection. Keep the Instagram tab active.
-- The original algorithm may return incomplete lists when Instagram changes
-  its list virtualization, may fail on a changed modal DOM, and has no timeout
-  while list contents/heights keep changing. These original limitations were
-  deliberately preserved. No API fallback or new pagination logic is used.
+- The reference script retains its original limitations. Current scans validate
+  totals and bound retries, but Instagram can still hide data, alter markup or
+  change memberships without changing totals. No atomic live snapshot is claimed.
+  An unavailable exact total prevents verified completion.
 - A native Profile control or exact Close label may be unavailable. The own-page
   Edit profile control also confirms identity. Unsupported navigation controls
   may require opening Profile in Instagram while the extension waits; unsupported
@@ -204,6 +239,8 @@ Added extension files:
 - `extension/theme.js`
 - `extension/adapter.js`
 - `extension/checker-runner.js` (generated, contains original bytes)
+- `extension/safe-runner.js` (generated, retains original comparison/output)
+- `extension/collector.js`
 - `extension/popup.html`
 - `extension/popup.css`
 - `extension/popup.js`
@@ -220,6 +257,9 @@ Added development/documentation files:
 - `tests/browser.mjs`
 - `tests/extension.mjs`
 - `tests/timing.mjs`
+- `tests/collector.test.mjs`
+- `tests/collector-browser.mjs`
+- `tests/collector-fixture.mjs`
 - `docs/ALGORITHM.md`
 - `docs/DESIGN.md`
 - `docs/VERIFICATION.md`

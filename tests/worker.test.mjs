@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
 
 const workerSource = readFileSync('extension/service-worker.js', 'utf8');
+const verified = { verified: true, following: { expected: 2, collected: 2 }, followers: { expected: 1, collected: 1 } };
 function harness(initialTabs = [], initialOperation) {
   let operation = initialOperation;
   let nextId = 100;
@@ -77,11 +78,11 @@ test('own-profile active tab is reused; only genuine result event marks completi
   await h.dispatch({ type: 'F4F_READY', runId: operation.runId }, h.page(3));
   assert.equal(h.operation.status, 'running');
   assert.equal(h.calls.filter(call => call[0] === 'inject').length, 1);
-  assert.deepEqual(Array.from(h.calls.find(call => call[0] === 'inject')[1].files), ['adapter.js', 'checker-runner.js']);
+  assert.deepEqual(Array.from(h.calls.find(call => call[0] === 'inject')[1].files), ['collector.js', 'adapter.js', 'safe-runner.js']);
   await h.dispatch({ type: 'F4F_READY', runId: operation.runId }, h.page(3));
   assert.equal(h.calls.filter(call => call[0] === 'inject').length, 1);
   const results = { heading: 'Seni Takip Etmeyenler (1)', summary: 'Takip Ettiğin: 2 | Takipçi: 1', accounts: [{ name: 'a', href: '/a' }] };
-  await h.dispatch({ type: 'F4F_FINISHED', runId: operation.runId, results }, h.page(3));
+  await h.dispatch({ type: 'F4F_FINISHED', runId: operation.runId, results, validation: verified }, h.page(3));
   assert.equal(h.operation.status, 'completed');
   assert.deepEqual(h.operation.results, results);
   await h.dispatch({ type: 'F4F_VIEW_RESULTS' });
@@ -151,8 +152,9 @@ test('failed injection and output-storage quota produce errors rather than succe
     if (data.operation.results) throw new Error('Quota'); return set(data);
   };
   await quota.dispatch({ type: 'F4F_FINISHED', runId: 'quota',
-    results: { heading: 'h', summary: 's', accounts: [] } }, quota.page(10));
+    results: { heading: 'h', summary: 's', accounts: [] }, validation: verified }, quota.page(10));
   assert.equal(quota.operation.status, 'error');
+  assert.equal(quota.operation.reason, 'storage_error');
 });
 test('completed results can reopen in a new tab after the original was closed', async () => {
   const h = harness([], { status: 'completed', tabId: 11, runId: 'done',
@@ -163,4 +165,28 @@ test('completed results can reopen in a new tab after the original was closed', 
   await h.dispatch({ type: 'F4F_PAGE_LOADED' }, h.page(id));
   assert.equal(h.operation.showResultsOnLoad, false);
   assert.ok(h.calls.some(call => call[0] === 'message' && call[2].type === 'F4F_SHOW_RESULTS'));
+});
+
+test('missing, rounded or incomplete collection evidence cannot publish non-followers', async () => {
+  for (const validation of [undefined, { ...verified, verified: false },
+    { ...verified, followers: { expected: 10000, collected: 250 } },
+    { ...verified, followers: { expected: 1.2, collected: 1.2 } }]) {
+    const h = harness([{ id: 12, url: 'https://www.instagram.com/me/' }],
+      { status: 'running', tabId: 12, runId: 'safe' });
+    await h.dispatch({ type: 'F4F_FINISHED', runId: 'safe', validation,
+      results: { heading: 'h', summary: 's', accounts: [] } }, h.page(12));
+    assert.equal(h.operation.status, 'error');
+    assert.equal(h.operation.reason, 'incomplete_scan');
+    assert.equal(h.operation.results, undefined);
+  }
+});
+
+test('actual collection progress changes the message without marking completion', async () => {
+  const h = harness([{ id: 13, url: 'https://www.instagram.com/me/' }],
+    { status: 'running', tabId: 13, runId: 'progress' });
+  await h.dispatch({ type: 'F4F_PROGRESS', runId: 'progress', list: 'followers', collected: 250, expected: 10000 }, h.page(13));
+  assert.equal(h.operation.status, 'running');
+  assert.match(h.operation.message, /250 of 10000/);
+  await h.dispatch({ type: 'F4F_PROGRESS', runId: 'progress', list: 'followers', collected: 10001, expected: 10000 }, h.page(13));
+  assert.match(h.operation.message, /250 of 10000/);
 });

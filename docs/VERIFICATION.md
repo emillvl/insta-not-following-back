@@ -1,5 +1,60 @@
 # Verification — 8 October 2026
 
+## Version 1.0.4 validated collection
+
+The user explicitly requested completion validation, safer collection and
+adaptive waiting/bounded retries. The current extension therefore uses a separate
+collector and generated validated runner. The standalone original and reference
+runner remain unchanged; their comparison/output tail is retained verbatim in
+the validated runner. Original scrolling/timing preservation now applies to the
+reference only. All runtime changes are scoped to collection and validation.
+
+`npm test` now passes **20 tests**, including exact localized count parsing,
+rounded-count rejection, comparison/output integrity, refusal to complete with
+missing or inconsistent validation and truthful collection progress. Static
+checks pass for original/reference bytes, retained comparison/output bytes,
+packaged assets, permissions and syntax.
+
+`npm run test:collector` passes **18 browser scenarios** using a controlled clock
+and real DOM geometry. Healthy cases cover 1,000/2,000/10,000 cumulative accounts,
+1,000/10,000 virtual rows, 2,000 recycled href anchors, 1.2-second virtual rendering,
+an 18-second batch delay, replacement of the scroll container, short non-scrolling
+lists, empty lists, and rounded labels with exact title values. Failure cases
+cover permanently stalled loading, missing exact totals, profile count changes,
+more rows than advertised, a closed list and the hard deadline. Every failure
+produced no completed result and no non-follower box.
+
+The initial virtual-list experiment exposed scrolls advancing before rows rendered.
+Scrolling now remains within already captured row coverage and waits for the next
+render. The added delayed-render regression passes. The observer collects only
+changed subtrees and caches the last mounted anchor; full-list queries are not
+repeated for each scroll. Progress is throttled to once per second plus boundaries.
+
+Unshortened healthy-fixture timing comparison passed: **49,128 ms original,
+2,050 ms validated**, with identical non-followers. Both used actual timers.
+The real 10,000-follower cumulative fixture passed with matching full totals and
+identical account results: **106,383 ms original, 9,958 ms validated**. Following
+included mutual accounts from the first, middle and final follower batches.
+The record is saved in `artifacts/collector-large-timing.json`.
+These measurements are local fixture evidence, not live processing-time promises.
+
+The **48 reference/navigation/theme browser checks** pass, including Incomplete
+scan recovery in both themes. The real unpacked MV3
+test passes using the production validated runner, verified count evidence,
+popup-independent execution, active tab reuse, login/Profile navigation, original
+result fields, theme persistence and View Results. An actual count mismatch also
+produced the Incomplete scan popup with no View Results or false account box.
+Storage-failure rendering retains a verified on-page list, while rejected
+completion evidence removes the list rather than presenting it as confirmed.
+These runs use temporary Edge
+profiles and local intercepted pages, not an authenticated account.
+
+Count equality is a consistency check. Same-size membership changes, inaccessible
+accounts or future Instagram DOM changes cannot be ruled out by these fixtures.
+Unavailable exact counts intentionally prevent verified results. Retry limits and
+the hard deadline prevent unbounded work while the page is executing; a browser
+freeze can still pause timers until the tab resumes.
+
 ## Version 1.0.3 appearance choices
 
 System, Light and Dark are available in every popup state. System is the default
@@ -64,7 +119,7 @@ the fix, so the previous page script and stalled session are replaced.
 
 ## Automated checks actually performed
 
-- `npm test`: **16 passed, 0 failed**. Covers exact original bytes and embedded
+- `npm test`: **20 passed, 0 failed**. Covers exact original bytes and embedded
   runner, English/Turkish selectors, additional close labels, conservative own
   profile recognition, visible tab reuse/creation, duplicate starts, genuine
   completion, normal login state, worker state recovery, reload/close errors,
@@ -74,12 +129,13 @@ the fix, so the previous page script and stalled session are replaced.
   referenced manifest assets, Manifest V3, exact restricted permissions, JavaScript
   syntax, absence of remote script/eval/Function/network clients and inline popup
   handlers. The original checksum is also confirmed in the committed Git blob.
-- `npm run test:browser`: **44 fixture checks passed** in headless Edge.
-  Six full-script differential runs compare original versus extension outputs,
+- `npm run test:browser`: **48 fixture checks passed** in headless Edge.
+  Six full-script differential runs compare original versus reference-runner outputs,
   counts, account fields, ordering, click sequence and requested timer values for
   English and Turkish. Inputs exercise duplicates, list snapshots, reserved-name
   exclusions, query components, case sensitivity and empty lists. Test clocks
-  accelerate execution; production timers are unchanged.
+  accelerate execution; reference-runner timers are unchanged. The current
+  collector's adaptive timing is tested separately above.
   Nine additional localized close-control fixtures pass. Error handling, automatic
   list control recognition with absolute/slashless hrefs, buttons, role links,
   supplied nested spans and native bubbling click handlers pass. Requested delays
@@ -88,7 +144,7 @@ the fix, so the previous page script and stalled session are replaced.
   Profile-control clicks without nav/avatar assumptions, Edit profile detection
   in English/Turkish, slashless profile paths, manual navigation after the old
   15-second cutoff, icon/button-only Profile controls, login gating/resume and
-  readiness timeout pass. Twelve actual popup state renders and login continuation
+  readiness timeout pass. Fourteen actual popup state renders and login continuation
   pass; no username form is present or submitted.
   Original close and profile-link fields are exercised. Desktop/narrow results,
   popup width/button bounds and warning selector/click isolation pass.
@@ -105,7 +161,7 @@ the fix, so the previous page script and stalled session are replaced.
   fixture's own profile, automatic execution and completion without pressing
   Start again. A local TLS server/host mapping covers initial browser-created
   navigations; external hosts are blocked. Test-only timers are accelerated.
-- `npm run test:timing`: passed using **real, unaccelerated browser timers**.
+- `npm run test:timing`: reference audit previously passed using **real, unaccelerated browser timers**.
   Original anchors versus adapted native buttons produced matching clicks, waits,
   results and stability logs. Measured times: original **49,186 ms**, packaged
   runner **49,085 ms**. In this two-account fixture each requested 2 × 3,000 ms,
@@ -119,7 +175,9 @@ the fix, so the previous page script and stalled session are replaced.
   is empty. Raw changes to that Git blob restore original CRLF encoding only.
   The working source and final committed source both match the supplied 5,818
   bytes and SHA-256 recorded in ALGORITHM.md. Production algorithm code changed:
-  **none**. The runner contains the full original file verbatim.
+  **none in the baseline/reference**. The current collector intentionally changes
+  scrolling, waiting and completion validation as requested in version 1.0.4.
+  Both runners retain the comparison/output bytes.
 
 An initial new-tab test fixture missed interception before the browser attached
 the new tab and reached Instagram's logged-out page; the extension correctly

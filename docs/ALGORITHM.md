@@ -9,6 +9,10 @@ current pathname, with slashes removed.
 
 ## Exact behavior preserved
 
+This section describes the standalone source and reference `checker-runner.js`.
+The current extension uses `safe-runner.js` with the explicitly requested
+collection safeguards below; its scrolling and timing are intentionally changed.
+
 - `openList(type)` finds an anchor whose href equals `/${username}/${type}/`,
   clicks it, then waits 3,000 ms.
 - `scrollAndCollect()` checks `div[role="dialog"]` up to 30 times, 500 ms apart;
@@ -28,7 +32,7 @@ current pathname, with slashes removed.
   There are no filters, sort controls, exports or other categories in the input.
 - Original errors are logged and alerted in Turkish.
 
-## Integration boundary
+## Reference integration boundary
 
 The build embeds the entire original file as an unchanged byte sequence in
 `extension/checker-runner.js`. A lexical `document` proxy delegates to the real
@@ -55,7 +59,52 @@ The baseline's limitations (including possible incomplete DOM lists, no hard
 timeout for continuously changing lists, and case-sensitive comparisons) are
 preserved intentionally. Navigation/readiness timeouts are outside the checker.
 
-## Original timing audit
+## Validated collection used by version 1.0.4
+
+The user's subsequent request explicitly authorized completion validation,
+safer collection and adaptive waits/bounded retries. These collection changes
+live in `collector.js`. The build generates a separate `safe-runner.js` from the
+immutable source by replacing only the openList, scrollAndCollect and closeModal
+delegates. The original comparison, result generation, labels, category and
+two-second between-list wait remain verbatim. The production worker injects
+collector/adapter/safe-runner; the old runner remains a reference.
+
+The collector reads exact following/follower counts from the recognized native
+controls. It accepts unambiguous localized integers and grouped thousands,
+including Arabic/Persian/fullwidth digits. Rounded values such as 10K/1.2M are
+not exact; an exact title or accessibility value may provide the integer.
+Missing or contradictory exact counts prevent verified completion.
+
+Each list starts by capturing mounted rows before scrolling. A single observer
+collects added/removed nodes and href changes, preserving recycled anchors' old
+and new values. Collection retains the original href extraction, reserved-name
+exclusions, case sensitivity and Set insertion order. A cached last mounted
+anchor bounds safe scrolling, so an unseen virtual gap is not skipped and no
+full-list query is repeated on each scroll. Replaced scroll containers are
+recognized and scanned once. Already captured mounted rows can be crossed in
+one step; virtual windows retain viewport overlap.
+
+Healthy traversal uses a 200 ms cadence. Stalled loading/rendering gets waits
+of 1.5, 3, 6 and 10 seconds, woken early by new accounts or loading progress.
+Actual new accounts reset the retry budget. Four quiet waits fail the list;
+each list also has a 20-minute deadline even if content keeps changing.
+Dialog opening is bounded at 15 seconds and closing at 2.5 seconds. Empty lists
+skip opening; short non-scrolling lists are accepted when counts match.
+
+Both collected totals must match the exact initial counts, and the profile
+totals are read again before publication. The adapter and worker require
+verified evidence before completion. A collection/validation failure publishes no non-followers and
+removes a prematurely generated result box. Owned observers/dialogs are cleaned
+up. Counts are a consistency check, not an atomic snapshot guarantee: list
+membership can change without changing totals during sequential collection.
+
+On the healthy 10,000-follower cumulative fixture, actual unshortened timers
+measured 106,383 ms for the reference and 9,958 ms for validated collection.
+Full totals and result accounts matched, including followed accounts appearing
+in the first, middle and final follower batches. This is fixture evidence;
+Instagram's live loading delays and DOM behavior still determine actual times.
+
+## Original reference timing audit
 
 `npm run test:timing` executes the original on anchors and the packaged adapter
 on native buttons concurrently in isolated browser fixtures, with actual timers
