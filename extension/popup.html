@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>F4F Checker</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="brand-mark" aria-hidden="true">f4f<span>↗</span></div>
+    <div><h1>F4F Checker</h1><p>Your follow-back check</p></div>
+  </header>
+  <main>
+    <section class="status-panel" aria-live="polite" aria-atomic="true">
+      <div id="indicator" class="indicator idle" aria-hidden="true"><span id="symbol">↗</span></div>
+      <h2 id="title">Ready to check?</h2>
+      <p id="message">See which accounts you follow don’t follow you back.</p>
+    </section>
+    <p id="reminder" class="reminder">Instagram will open in an active tab. Keep it active while checking.</p>
+    <p id="result-summary" class="result-summary" hidden></p>
+    <form id="profile-form" hidden>
+      <label for="username">Your Instagram username</label>
+      <input id="username" name="username" placeholder="username" autocomplete="off" maxlength="30" pattern="[a-zA-Z0-9._]{1,30}" required>
+      <p class="field-note">Use your own account. We couldn’t identify its profile link.</p>
+      <button type="submit" class="primary">Continue Checking</button>
+    </form>
+    <div class="actions">
+      <button id="start" class="primary">Start Checking <span aria-hidden="true">→</span></button>
+      <button id="view" class="primary" hidden>View Results <span aria-hidden="true">↗</span></button>
+      <button id="continue" class="primary" hidden>Return to Instagram</button>
+      <button id="again" class="secondary" hidden>Check Again</button>
+    </div>
+    <p id="action-error" role="alert" hidden></p>
+  </main>
+  <footer><span class="privacy-dot" aria-hidden="true"></span>Runs in your browser. No account data is sent.</footer>
+</body>
+</html>
