@@ -31,8 +31,13 @@ globalThis.F4FCollector = (() => {
   }
   function capture(node) {
     if (node.nodeType !== 1) return;
-    if (node.matches(ROWS)) addHref(node.getAttribute('href'));
-    for (const row of node.querySelectorAll(ROWS)) addHref(row.getAttribute('href'));
+    const row = anchor => {
+      addHref(anchor.getAttribute('href'));
+      if (current.area?.contains(anchor) && (!current.lastRow?.isConnected ||
+        current.lastRow.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) current.lastRow = anchor;
+    };
+    if (node.matches(ROWS)) row(node);
+    for (const anchor of node.querySelectorAll(ROWS)) row(anchor);
   }
   function mutations(records) {
     const before = current.users.size;
@@ -99,9 +104,8 @@ globalThis.F4FCollector = (() => {
     const area = current.area;
     const top = area.scrollTop;
     const height = area.clientHeight;
-    const rows = area.querySelectorAll(ROWS);
     // Jump across rows already captured, but never across an unseen virtual gap.
-    const last = rows[rows.length - 1];
+    const last = current.lastRow?.isConnected ? current.lastRow : null;
     const knownBottom = last ? last.getBoundingClientRect().bottom - area.getBoundingClientRect().top + top : top;
     const target = Math.min(area.scrollHeight - height, Math.max(top, knownBottom - height * .2));
     if (target <= top + 1) return false;
@@ -142,6 +146,7 @@ globalThis.F4FCollector = (() => {
       if (!current.dialog.isConnected) throw failure('The Instagram list was closed during checking. Retry checking.', 'interrupted');
       if (!current.area?.isConnected) {
         current.area = scrollArea(current.dialog);
+        current.lastRow = null;
         capture(current.area || current.dialog);
       }
       flush();
