@@ -6,7 +6,7 @@ By Emil Valiyev
 
 A Chrome extension that checks which Instagram accounts you follow don't follow
 you back. It opens your own profile, reads the following and follower lists, and
-shows the results on Instagram.
+shows the results on Instagram. No login credentials needed.
 
 The original browser-console script is on
 [DevConsole-Version](https://github.com/emillvl/insta-not-following-back/tree/DevConsole-Version).
