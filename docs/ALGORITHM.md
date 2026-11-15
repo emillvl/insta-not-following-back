@@ -53,7 +53,7 @@ shortens these waits. It captures mounted rows before scrolling and observes
 added, removed, and recycled rows, including old href values. Account links
 resolve to Instagram profile URLs. Plain links need an account-name label that
 matches the destination, including an exact username in a nested element. The
-collector retains case and insertion order.
+collector treats usernames case-insensitively and retains insertion order.
 
 A cached last row guides scrolling through captured coverage. When the target
 stops advancing, the collector waits for rendering, moves to the edge of the
@@ -70,33 +70,29 @@ Deactivated rows are retained above those totals.
 
 Exact counts accept localized integers and grouped thousands, including Arabic,
 Persian, and fullwidth digits. Rounded values require an exact title or accessible
-value. Profile totals are read again before comparison. When the list settles
-before the scan can be verified or loading stalls above the end, the collector
-checks for progress for up to 90 seconds. After 45 seconds without a loader it
-can rewind and rescan from the top, or reopen a short list that has no usable scroll range.
-New accounts reset the stall timer and allow another recheck on a later batch.
-
-A short scan triggers one direct navigation to the current account’s list URL
-in a temporary tab. The worker accepts the intended same-account route or a
-redirect back to the verified profile. The collector reads the list dialog or
-the labelled list page, then returns the names from a settled scan. The original
-page adds names it had missed and checks the combined total. The worker closes
-the temporary tab and discards responses from other tabs or accounts.
+value. Profile totals are read again before comparison. When a list settles
+short of its total, the collector can rewind to retrigger pagination in the
+original tab. It waits three paced passes at the settled end after that recheck.
+New rows allow another recheck for a later batch. A stall with visible loading
+or above the end still gets up to 90 seconds after the initial stable passes.
+An empty, settled dialog can be reopened once.
 
 If the list has settled with fewer unique accounts than the profile count,
 the collector retains it and reads the other list. A Following action on a
-specific Followers row can verify that account as a mutual follow. If a shortfall
-remains and the other list supplies a small set of candidates, the collector
-uses the native list search with those exact usernames. Results must match the
-username and expose an affirmative relationship action for the list being
-checked. Checks use the normal scroll cadence and observe Instagram’s cooldown
-across up to 14 exact searches per scan. Both totals are checked again before
-comparison.
+specific Followers row can verify that account as a mutual follow. A
+Follow Back or Requested action rules out a current outgoing follow. If a
+shortfall remains, the collector searches only eligible usernames from the
+opposite list, putting accounts marked deactivated last. A search result must
+match the username and expose an affirmative relationship for the list being
+checked. The collector can verify missing followers in the already open list.
+It limits a scan to 14 exact searches, spaces them at least 1,500 ms apart, and
+waits for visible search loaders before sending the next name. Both totals are
+checked again before comparison.
 
 The worker observes first-party HTTP 429 responses in the top frame of the
 scanning tab. It honors `Retry-After` as seconds or an HTTP date and uses one-,
 two- and four-minute waits when no usable header is present. During the wait,
-the collector keeps observing rows and pauses list opening and scrolling. The
+the collector keeps observing rows and pauses list opening, scrolling, and searches. The
 banner shows the next attempt time. Once it elapses, a short list stays in
 Waiting for Instagram until the collected count grows. An empty dialog that
 still shows a loader can be reopened once after 45 more seconds of settled

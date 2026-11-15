@@ -24,11 +24,9 @@ function retryAfter(headers, now) {
   if (!value) return 0;
   return /^\d+$/.test(value) ? Math.min(now + Number(value) * 1000, 8.64e15) : Date.parse(value);
 }
-async function pauseForRateLimit(tabId, headers, now, navigation) {
+async function pauseForRateLimit(tabId, headers, now) {
   const operation = await read();
-  const onListPage = tabId === operation.listPage?.tabId;
-  if (operation.status !== 'running' || (!onListPage && tabId !== operation.tabId) || operation.startedAt > now) return;
-  if (navigation && (!onListPage || !expectedListPage(navigation, operation.listPage))) return;
+  if (operation.status !== 'running' || tabId !== operation.tabId || operation.startedAt > now) return;
   const currentRetry = operation.retryAt || 0;
   const advertised = retryAfter(headers, now);
   let backoff = operation.rateLimitBackoff || 0;
@@ -40,9 +38,8 @@ async function pauseForRateLimit(tabId, headers, now, navigation) {
   }
   if (retryAt <= currentRetry) return;
   const message = `Instagram is limiting requests. Next attempt after ${new Date(retryAt).toLocaleString()}.`;
-  const signal = { type: 'F4F_RATE_LIMIT', runId: operation.runId, retryAt, message };
-  void chrome.tabs.sendMessage(operation.tabId, signal, { frameId: 0 }).catch(() => {});
-  if (operation.listPage) void chrome.tabs.sendMessage(operation.listPage.tabId, signal, { frameId: 0 }).catch(() => {});
+  void chrome.tabs.sendMessage(tabId, { type: 'F4F_RATE_LIMIT', runId: operation.runId,
+    retryAt, message }, { frameId: 0 }).catch(() => {});
   await save({ ...operation, retryAt, rateLimitBackoff: backoff, reason: 'rate_limited', message });
 }
 function fromPopup(sender) {
@@ -54,8 +51,7 @@ function fromPage(sender, operation, message) {
 }
 async function fail(operation, message, reason = 'checker_error') {
   if (!ACTIVE.has(operation.status)) return operation;
-  const error = await save({ ...operation, status: 'error', message, reason, results: undefined, listPage: undefined });
-  if (operation.listPage) void chrome.tabs.remove(operation.listPage.tabId).catch(() => {});
+  const error = await save({ ...operation, status: 'error', message, reason, results: undefined });
   if (operation.tabId) chrome.tabs.sendMessage(operation.tabId, {
     type: 'F4F_ERROR', runId: operation.runId, message, reason
   }).catch(() => {});
@@ -72,66 +68,6 @@ async function ensureContent(tabId) {
     await chrome.scripting.executeScript({ target: { tabId }, files: ['theme.js', 'localization.js', 'list-controls.js', 'content.js'] });
   }
 }
-function expectedListPage(url, request) {
-  try {
-    const page = new URL(url);
-    const path = page.pathname.replace(/\/$/, '');
-    return page.origin === request.origin && [`/${request.username}`, `/${request.username}/${request.list}`].includes(path);
-  } catch { return false; }
-}
-async function finishListPage(operation, result, tabClosed = false) {
-  const { listPage, ...rest } = operation;
-  await save(rest);
-  void chrome.tabs.sendMessage(operation.tabId, { type: 'F4F_LIST_PAGE_RESULT', runId: operation.runId,
-    accounts: result.accounts, reason: result.reason, message: result.message }, { frameId: 0 }).catch(() => {});
-  if (!tabClosed) void chrome.tabs.remove(listPage.tabId).catch(() => {});
-}
-async function assistListPage(operation) {
-  const request = operation.listPage;
-  if (request.started) return;
-  try {
-    const tab = await chrome.tabs.get(request.tabId);
-    if (tab.status !== 'complete') return;
-    if (!expectedListPage(tab.url, request)) {
-      await finishListPage(operation, {});
-      return;
-    }
-    await ensureContent(tab.id);
-    await save({ ...operation, listPage: { ...request, started: true } });
-    const target = { tabId: tab.id };
-    await chrome.scripting.executeScript({ target, files: ['collector.js'] });
-    await chrome.scripting.executeScript({ target, func: options => { void F4FBridge.readListPage(options); },
-      args: [{ ...request, runId: operation.runId, retryAt: operation.retryAt, message: operation.message }] });
-  } catch {
-    await finishListPage(operation, {});
-  }
-}
-async function openListPage(operation, message, sender) {
-  const { list, expected, collected, deadline } = message;
-  const username = operation.username;
-  if (operation.listPage || !USERNAME.test(username || '') || !['following', 'followers'].includes(list) ||
-    !Number.isSafeInteger(expected) || !Number.isSafeInteger(collected) || collected < 0 || collected >= expected ||
-    !Number.isSafeInteger(deadline) || deadline <= Date.now()) return { ignored: true };
-  const { origin } = new URL(sender.url);
-  const request = { origin, username, list, expected, deadline };
-  if (!expectedListPage(sender.url, request)) return { ignored: true };
-  if (operation.retryAt > Date.now()) {
-    return { reason: 'rate_limited', message: `Instagram is limiting requests. Retry after ${new Date(operation.retryAt).toLocaleString()}.` };
-  }
-  const parent = await chrome.tabs.get(operation.tabId);
-  const tab = await chrome.tabs.create({ url: `${origin}/${username}/${list}/`, windowId: parent.windowId,
-    openerTabId: parent.id, active: true });
-  try {
-    const listPage = { ...request, tabId: tab.id };
-    const next = await save({ ...operation, listPage,
-      message: `Found ${collected} of ${expected}. Checking Instagram’s /${list}/ page for the remaining accounts.` });
-    if (tab.status === 'complete') await assistListPage(next);
-    return { ok: true };
-  } catch (error) {
-    void chrome.tabs.remove(tab.id).catch(() => {});
-    throw error;
-  }
-}
 async function assist(operation) {
   const tab = await chrome.tabs.get(operation.tabId);
   if (tab.status !== 'complete') return;
@@ -143,7 +79,7 @@ async function assist(operation) {
 async function start() {
   const previous = await read();
   if (ACTIVE.has(previous.status)) {
-    if (previous.tabId) await foreground(previous.listPage?.tabId || previous.tabId);
+    if (previous.tabId) await foreground(previous.tabId);
     return previous;
   }
   if (previous.retryAt > Date.now()) {
@@ -165,19 +101,21 @@ async function start() {
     return operation;
   } catch (error) { return fail(operation, error.message, 'navigation_error'); }
 }
+async function runningStatus(operation) {
+  try {
+    const probe = await chrome.tabs.sendMessage(operation.tabId, { type: 'F4F_PING' });
+    if (probe?.runId === operation.runId && probe.running) return operation;
+  } catch {}
+  return fail(operation, 'The Instagram page changed and checking stopped. Please retry.', 'interrupted');
+}
 async function status() {
   const operation = await read();
   if (!ACTIVE.has(operation.status)) return operation;
   if (!operation.tabId) return fail(operation, 'Navigation was interrupted. Please retry.', 'navigation_error');
+  if (operation.status === 'running') return runningStatus(operation);
   try {
     const tab = await chrome.tabs.get(operation.tabId);
-    if (operation.status === 'running') {
-      const probe = await chrome.tabs.sendMessage(tab.id, { type: 'F4F_PING' });
-      if (probe.runId !== operation.runId || !probe.running) {
-        return fail(operation, 'The Instagram page changed and checking stopped. Please retry.', 'interrupted');
-      }
-      if (operation.listPage && !operation.listPage.started) await assistListPage(operation);
-    } else if (tab.status === 'complete') await assist(operation);
+    if (tab.status === 'complete') await assist(operation);
     return await read();
   } catch { return fail(operation, 'The Instagram tab is unavailable. Please retry.', 'interrupted'); }
 }
@@ -214,31 +152,15 @@ async function handle(message, sender) {
     }
   }
   const operation = await read();
-  const request = operation.listPage;
-  const fromListPage = request && sender.frameId === 0 && sender.tab?.id === request.tabId &&
-    expectedListPage(sender.url, request);
-  if (message.type === 'F4F_PAGE_LOADED') {
-    if (fromListPage) await assistListPage(operation);
-    else if (sender.frameId !== 0 || sender.tab?.id !== operation.tabId) return { ignored: true };
-    else if (operation.status === 'waiting') await assist(operation);
-    else if (operation.status === 'completed' && operation.showResultsOnLoad) {
+  if (message.type === 'F4F_PAGE_LOADED' && sender.frameId === 0 && sender.tab?.id === operation.tabId) {
+    if (operation.status === 'waiting') await assist(operation);
+    if (operation.status === 'completed' && operation.showResultsOnLoad) {
       await chrome.tabs.sendMessage(operation.tabId, { type: 'F4F_SHOW_RESULTS', results: operation.results });
       await save({ ...operation, showResultsOnLoad: false });
     }
     return { ok: true };
   }
-  if (fromListPage) {
-    if (!request.started || operation.status !== 'running' || message.runId !== operation.runId) return { ignored: true };
-    if (message.type === 'F4F_LIST_PAGE_DONE') {
-      const accounts = Array.isArray(message.accounts) && message.accounts.every(name =>
-        typeof name === 'string' && USERNAME.test(name)) ? message.accounts : undefined;
-      await finishListPage(operation, { accounts, reason: message.reason, message: message.message });
-      return { ok: true };
-    }
-    if (message.type !== 'F4F_PROGRESS' || message.list !== request.list || message.expected !== request.expected) {
-      return { ignored: true };
-    }
-  } else if (!fromPage(sender, operation, message)) return { ignored: true };
+  if (!fromPage(sender, operation, message)) return { ignored: true };
   if (message.type === 'F4F_WAIT_STATUS' && operation.status === 'waiting') {
     const username = message.reason === 'profile_navigation' &&
       typeof message.username === 'string' && USERNAME.test(message.username) ?
@@ -258,7 +180,6 @@ async function handle(message, sender) {
     } catch (error) { return fail(running, error.message, 'injection_error'); }
     return running;
   }
-  if (message.type === 'F4F_OPEN_LIST_PAGE' && operation.status === 'running') return openListPage(operation, message, sender);
   if (message.type === 'F4F_PROGRESS' && operation.status === 'running') {
     const { list, collected, expected } = message;
     if (!['following', 'followers'].includes(list) ||
@@ -279,8 +200,9 @@ async function handle(message, sender) {
       return save({ ...operation, progress: firstAfterCooldown || last?.list !== list ? progress : last,
         reason: 'waiting_for_instagram', message: detail });
     }
-    const checked = fromListPage ? `Checking Instagram’s /${list}/ page` : `Checking ${label}`;
-    return save({ ...operation, progress, reason: undefined, message: `${checked}… ${count}` });
+    const detail = `Checking ${label}… ${count}`;
+    if (!operation.reason && operation.message === detail) return operation;
+    return save({ ...operation, progress, reason: undefined, message: detail });
   }
   if (message.type === 'F4F_FINISHED' && operation.status === 'running') {
     const validation = message.validation;
@@ -315,24 +237,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   return true;
 });
 chrome.webRequest.onHeadersReceived.addListener(details => {
-  const navigation = details.type === 'main_frame' ? details.url : null;
   if (details.statusCode !== 429 || details.frameId !== 0 || details.tabId < 0 ||
-    (!navigation && !IG_ORIGIN.test(details.initiator || ''))) return;
+    !IG_ORIGIN.test(details.initiator || '')) return;
   const now = Date.now();
-  serialized(() => pauseForRateLimit(details.tabId, details.responseHeaders, now, navigation)).catch(console.error);
-}, { urls: IG_URLS, types: ['xmlhttprequest', 'main_frame'] }, ['responseHeaders']);
+  serialized(() => pauseForRateLimit(details.tabId, details.responseHeaders, now)).catch(console.error);
+}, { urls: IG_URLS, types: ['xmlhttprequest'] }, ['responseHeaders']);
 chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status !== 'complete') return;
   serialized(async () => {
     const operation = await read();
-    if (operation.listPage?.tabId === tabId) {
-      if (change.status === 'complete') await assistListPage(operation);
-      else if (operation.listPage.started && change.status === 'loading') await finishListPage(operation, {});
-      return;
-    }
     if (operation.tabId !== tabId) return;
-    if (operation.status === 'running' && change.status === 'loading') {
-      await fail(operation, 'Instagram was reloaded or navigated away. Checking stopped.', 'interrupted');
-    } else if (operation.status === 'waiting' && change.status === 'complete') {
+    if (operation.status === 'running') await runningStatus(operation);
+    else if (operation.status === 'waiting') {
       try { await assist(operation); } catch (error) { await fail(operation, error.message, 'navigation_error'); }
     }
   }).catch(console.error);
@@ -340,7 +256,6 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 chrome.tabs.onRemoved.addListener(tabId => {
   serialized(async () => {
     const operation = await read();
-    if (operation.listPage?.tabId === tabId) await finishListPage(operation, {}, true);
     if (operation.tabId === tabId) await fail(operation, 'The Instagram tab was closed. Please retry.', 'interrupted');
   }).catch(console.error);
 });

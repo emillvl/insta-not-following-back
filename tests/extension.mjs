@@ -12,7 +12,7 @@ const channel = process.env.F4F_BROWSER_CHANNEL || 'msedge';
 const extensionPath = resolve('extension');
 const retrySeconds = 8;
 const followingRequests = [];
-const listPages = new Map();
+const listNavigations = [];
 const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="sidebar"><a href="/me/"><span>Profile</span></a></div>
@@ -24,7 +24,11 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   if(!['/me','/me/'].includes(location.pathname))document.getElementById('edit').remove();
   for(const link of document.querySelectorAll('[data-kind]'))link.onclick=event=>{
     event.preventDefault();const dialog=document.createElement('div');dialog.setAttribute('role','dialog');
-    const close=document.createElement('button');close.setAttribute('aria-label','Fermer');close.onclick=()=>dialog.remove();
+    if(window.__useListRoutes)history.replaceState(null,'','/me/'+link.dataset.kind+'/');
+    const close=document.createElement('button');close.setAttribute('aria-label','Fermer');close.onclick=()=>{
+      dialog.remove();
+      if(window.__useListRoutes)history.replaceState(null,'','/me/');
+    };
     const scroll=document.createElement('div');scroll.style.cssText='height:100px;overflow-y:auto';
     const names=window.__listAccounts?.[link.dataset.kind]?.slice()??
       (link.dataset.kind==='following'?['mutual','missing']:['mutual','fan']);
@@ -32,7 +36,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     const addRow=name=>{const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;
       if(link.dataset.kind==='following'&&name==='mutual')row.removeAttribute('role');
       if(link.dataset.kind==='following'&&name==='missing')row.href='https://www.instagram.com/missing/';
-      scroll.append(row);};
+      const label=link.dataset.kind==='followers'&&window.__followerStates?.[name];
+      if(!label){scroll.append(row);return;}
+      const section=document.createElement('div'),status=document.createElement('button');
+      status.textContent=label;section.append(row,status);scroll.append(section);};
     names.forEach(addRow);
     if(window.__searchableFollowing&&link.dataset.kind==='following'){
       const search=document.createElement('input');search.type='search';dialog.append(search);
@@ -81,11 +88,9 @@ const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }
     }
     res.end(); return;
   }
-  const list = req.url.match(/^\/me\/(following|followers)\/$/)?.[1];
-  if (list) {
-    if (listPages.has(list)) {
-      res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(listPages.get(list));
-    } else res.writeHead(302, { Location: '/other_account/' }).end();
+  if (/^\/me\/(following|followers)\/$/.test(req.url)) {
+    listNavigations.push(req.url);
+    res.writeHead(302, { Location: '/other_account/' }).end();
     return;
   }
   res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html);
@@ -143,6 +148,7 @@ try {
   assert.equal(await popup.locator('.author').textContent(), 'By Emil Valiyev');
   assert.ok(await popup.locator('.logo-dark').evaluate(img => img.complete && img.naturalWidth === 128));
   assert.equal(await worker.evaluate(() => chrome.runtime.getManifest().action.default_icon['32']), 'icons/icon-32.png');
+  assert.equal(await worker.evaluate(() => chrome.runtime.getManifest().version), '1.1.0');
   await popup.locator('#start').click();
   try { await instagram.waitForSelector('[data-f4f-results]', { timeout: 15000 }); }
   catch (error) {
@@ -258,7 +264,7 @@ try {
     url: 'https://www.instagram.com/*'
   })) }));
   assert.equal(operation.reason, 'incomplete_scan');
-  assert.equal(operation.message, 'F4F Checker verified 2 of 3 accounts you follow after trying Instagram’s /following/ page. No comparison was made.');
+  assert.equal(operation.message, 'F4F Checker verified 2 of 3 accounts you follow. No comparison was made.');
   assert.equal(operation.results, undefined);
   assert.equal(await createdPage.locator('[data-f4f-results]').count(), 0);
   const errorView = await context.newPage();
@@ -268,29 +274,6 @@ try {
   assert.equal(await errorView.locator('#view').isVisible(), false);
   console.log('PASS: real MV3 incomplete list → retryable Incomplete scan, no View Results and no false non-follower box.');
 
-  const followingNames = Array.from({ length: 114 }, (_, index) => `follow_${index + 1}`);
-  const accountRows = names => names.map(name => `<a role="link" href="/${name}/" style="display:block;height:90px">${name}</a>`).join('');
-  listPages.set('following', `<!doctype html><main><h1>Following</h1>${accountRows(followingNames.slice(98))}</main>
-    <aside>${accountRows(['unrelated_suggestion'])}</aside>`);
-  listPages.set('followers', `<!doctype html><section role="dialog"><div style="height:100px;overflow:auto">
-    ${accountRows(['follow_1', 'follow_114'])}</div></section>`);
-  await createdPage.evaluate(names => {
-    window.__listAccounts = { following: names.slice(0, 108), followers: ['follow_1'] };
-    document.querySelector('[data-kind="following"]').textContent = '114 following';
-  }, followingNames);
-  await worker.evaluate(() => chrome.storage.session.clear());
-  const openedListPages = [];
-  const accelerateListPage = async page => {
-    await page.waitForURL(url => /\/me\/(following|followers)\/$/.test(url.pathname), { timeout: 20000 });
-    openedListPages.push(new URL(page.url()).pathname);
-    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({ url }))[0].id, page.url());
-    await accelerateTimers(tabId);
-  };
-  const pageTasks = [];
-  const captureListPage = page => { pageTasks.push(accelerateListPage(page)); };
-  await errorView.reload();
-  context.on('page', captureListPage);
-  await errorView.locator('#start').click();
   const readOperation = () => worker.evaluate(async () => (await chrome.storage.session.get('operation')).operation);
   const waitForOperation = async (predicate, timeout) => {
     const end = Date.now() + timeout;
@@ -302,44 +285,50 @@ try {
     } while (Date.now() < end && state?.status !== 'error');
     throw new Error(`Unexpected extension state: ${JSON.stringify(state)}`);
   };
-  const recovered = await waitForOperation(state => state?.status === 'completed', 30000);
-  context.off('page', captureListPage);
-  await Promise.all(pageTasks);
-  assert.deepEqual(openedListPages, ['/me/following/', '/me/followers/']);
-  assert.deepEqual(recovered.validation.following, { expected: 114, collected: 114 });
-  assert.deepEqual(recovered.validation.followers, { expected: 2, collected: 2 });
-  assert.deepEqual(recovered.results.accounts.map(account => account.name), followingNames.slice(1, -1));
-  assert.equal((await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.instagram.com/*' }))).length, 1);
-  console.log('PASS: both native list URLs are read when short, merging six missed accounts and closing the temporary tabs.');
-
-  const missingFromPages = followingNames.slice(20, 23);
-  const uniquePageRows = followingNames.filter(name => !missingFromPages.includes(name));
-  const repeatedPageRows = [...uniquePageRows, ...uniquePageRows.slice(0, 3)];
-  listPages.set('following', `<!doctype html><main><h1>Following</h1>${accountRows(repeatedPageRows)}</main>`);
-  await createdPage.evaluate(({ following, names }) => {
-    window.__listAccounts = { following, followers: names.slice(0, -1) };
+  const followingNames = Array.from({ length: 114 }, (_, index) => `follow_${index + 1}`);
+  const missingNames = followingNames.slice(20, 23);
+  const uniqueNames = followingNames.filter(name => !missingNames.includes(name));
+  const followingRows = [...uniqueNames, ...uniqueNames.slice(0, 3)];
+  await createdPage.evaluate(({ following, names, confirmed }) => {
+    window.__useListRoutes = true;
+    window.__listAccounts = { following, followers: ['fan', 'deactivated_name', ...names.slice(0, -1)] };
+    window.__followerStates = { fan: 'Follow Back', deactivated_name: 'Deactivated account', [confirmed]: 'Following' };
     window.__searchableFollowing = names;
-    document.querySelector('[data-kind="followers"]').textContent = '113 followers';
-  }, { following: repeatedPageRows, names: followingNames });
+    document.querySelector('[data-kind="following"]').textContent = '114 following';
+    document.querySelector('[data-kind="followers"]').textContent = '114 followers';
+  }, { following: followingRows, names: followingNames, confirmed: missingNames[0] });
   await worker.evaluate(() => chrome.storage.session.clear());
   const reconciliationPopup = await context.newPage();
   await reconciliationPopup.goto(`chrome-extension://${extensionId}/popup.html`);
-  context.on('page', captureListPage);
+  let openedTabs = 0;
+  const countNewTab = () => openedTabs++;
+  context.on('page', countNewTab);
   await reconciliationPopup.locator('#start').click();
   const reconciled = await waitForOperation(state => state?.status === 'completed', 30000);
-  context.off('page', captureListPage);
-  await Promise.all(pageTasks);
-  assert.equal(openedListPages.at(-1), '/me/following/');
-  assert.deepEqual(await createdPage.evaluate(() => window.__searchedFollowing), missingFromPages);
+  context.off('page', countNewTab);
+  assert.equal(openedTabs, 0);
+  assert.deepEqual(listNavigations, []);
+  assert.deepEqual(await createdPage.evaluate(() => window.__searchedFollowing), missingNames.slice(1));
   assert.deepEqual(reconciled.validation.following, { expected: 114, collected: 114 });
-  assert.deepEqual(reconciled.validation.followers, { expected: 113, collected: 113 });
+  assert.deepEqual(reconciled.validation.followers, { expected: 114, collected: 115 });
   assert.deepEqual(reconciled.results.accounts, [{ name: 'follow_114', href: '/follow_114' }]);
-  console.log('PASS: when both Following pages return 114 rows with only 111 distinct accounts, the extension verifies the three missing members by exact search.');
+  console.log('PASS: 114 Following rows with 111 unique names recover using visible proof and two exact searches in the original tab.');
 
   await createdPage.close();
   await worker.evaluate(() => chrome.storage.session.clear());
   const limitedPage = await context.newPage();
   await limitedPage.goto('https://www.instagram.com/me/');
+  const reloadPopup = await context.newPage();
+  await reloadPopup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await reloadPopup.locator('#start').click();
+  await waitForOperation(state => state?.status === 'running', 10000);
+  await limitedPage.reload();
+  const interrupted = await waitForOperation(state => state?.status === 'error', 10000);
+  assert.equal(interrupted.reason, 'interrupted');
+  assert.equal(interrupted.results, undefined);
+  console.log('PASS: reloading the Instagram document during a real MV3 scan safely interrupts it.');
+
+  await worker.evaluate(() => chrome.storage.session.clear());
   await limitedPage.evaluate(() => {
     window.__limitFollowing = true;
     document.querySelector('[data-kind="following"]').textContent = '3 following';

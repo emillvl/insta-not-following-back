@@ -1,15 +1,22 @@
 # Verification
 
-## 15 November 2026
+## 15 November 2026, version 1.1.0
 
 A signed-in trace captured 114 entries from Instagram’s Following responses,
 including repeated account IDs. The final page had no next page, and the
-checker captured all 111 distinct usernames. The 1.0.9 regression fixture gives
-both the normal list and its direct page those same duplicate counts. The
-extension finishes reading Followers, checks three exact usernames, and
-verifies 114 distinct Following accounts. Separate cases cover visible mutual
-follow evidence and a matching suggestion without the required relationship.
-The latter remains incomplete.
+checker captured all 111 distinct usernames. The unpacked 1.1.0 integration
+fixture reproduces the duplicate counts and recovers 114 distinct Following
+accounts with one visible Following status and two exact searches. It uses the
+original browser tab and the same-document list routes. The test checks that the
+Follow Back and deactivated rows are skipped and that the result is exact.
+
+With the test clock, the duplicate-row fixture took 69 seconds in 1.1.0 and
+163 seconds in the 1.0.9 collector with its optional direct-page retry absent.
+The two builds verified the same memberships. With real timers, 1.1.0 took
+68.6 seconds on that fixture and 49.1 seconds on the healthy fixture, matching
+the original checker’s 49.1 seconds. Separate cases cover exact
+searches that are still loading and matching suggestions that lack the required
+relationship. The latter remain incomplete.
 
 Browser fixtures reproduce a shortfall of 108 out of 114 with the previous
 collector. Six plain links were missed when their usernames and display names
@@ -17,12 +24,9 @@ were in separate elements. A separate fixture needed to leave the pagination
 trigger zone before the remaining six rows could load. The updated collector
 reads all 114 in both cases and captures usernames from rapidly recycled links.
 
-The unpacked extension is tested with a 108-row profile dialog and a direct
-list page that exposes the missing rows. The integration check verifies both
-list addresses, the exact comparison, cleanup of temporary tabs, and rejection
-of a redirect to another account. The local HTTP 429 fixture verifies cooldown
-and resumption. Static checks detect stale generated runners without editing
-them. Signed-in Instagram checks use the manual procedure below.
+The local HTTP 429 fixture verifies the cooldown and resumption. Static checks
+detect stale generated runners. Signed-in Instagram checks use the manual
+procedure below.
 
 ## Earlier verification
 

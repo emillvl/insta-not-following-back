@@ -11,6 +11,7 @@ export function collectorFixture(options = {}) {
   const following=size===0?[]:[...(options.followingEnd||options.mixedLinks||options.splitAccountLabels||options.reconcile ? followers.slice(0,113) : mutual),'missing'];
   const reconcileList=options.reconcileList||'following';
   const omitted=(reconcileList==='following'?following:followers).slice(20,23);
+  if(options.reconcile==='targeted')followers.unshift('fan_only','deactivated_name');
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
   window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
   window.__retryAt=0;
@@ -78,21 +79,33 @@ export function collectorFixture(options = {}) {
         const row=document.createElement('div'),button=document.createElement('button');
         button.textContent=label;row.append(makeRow(name),button);return row;
       };
+      const followerLabels=options.reconcile==='targeted'?
+        {fan_only:'Follow Back',deactivated_name:'Deactivated account',[omitted[0]]:'Following'}:{};
       const append=(node,values)=>{
         const target=inner&&node===list?inner:node;
-        for(const name of values)target.append(options.reconcile==='reverse'&&type==='followers'&&omitted.includes(name)?
-          relationshipRow(name,'Following'):makeRow(name));
+        for(const name of values){
+          const label=type==='followers'&&(followerLabels[name]||
+            (options.reconcile==='reverse'&&omitted.includes(name)?'Following':''));
+          target.append(label?relationshipRow(name,label):makeRow(name));
+        }
       };
       if(type===reconcileList&&options.reconcile){
         const shown=names.filter(name=>!omitted.includes(name));
-        append(list,[...shown,...shown.slice(0,omitted.length)]);
+        append(list,[...shown,...shown.slice(0,omitted.length).map(name=>options.caseVariants?name.toUpperCase():name)]);
         if(options.reconcile!=='reverse'){
           const search=document.createElement('input');search.type='search';dialog.append(search);
           search.addEventListener('input',()=>{
             const value=search.value;__searches.push({list:type,value,at:Date.now()});
             const positive=names.includes(value)&&!(options.reconcile==='invalid'&&value===omitted[1]);
             const label=type==='following'?'Following':'Remove';
-            list.replaceChildren(relationshipRow(value,positive?label:'Follow'),relationshipRow('unrelated',label));
+            const render=()=>{
+              dialog.removeAttribute('aria-busy');
+              list.replaceChildren(relationshipRow(value,positive?label:'Follow'),relationshipRow('unrelated',label));
+            };
+            if(options.searchDelay){
+              dialog.setAttribute('aria-busy','true');
+              setTimeout(render,options.searchDelay);
+            }else render();
           });
         }
       }else if(type==='following'&&options.followingEnd){

@@ -213,7 +213,10 @@ test('navigation/reload and closed tabs invalidate running state', async () => {
   for (const action of ['reload', 'close']) {
     const h = harness([{ id: 6, url: 'https://www.instagram.com/me/' }],
       { status: 'running', tabId: 6, runId: 'old' });
-    if (action === 'reload') h.update(6, { status: 'loading' }); else h.remove(6);
+    if (action === 'reload') {
+      h.probe = { runId: null, running: false };
+      h.update(6, { status: 'complete' });
+    } else h.remove(6);
     await h.settle();
     assert.equal(h.operation.status, 'error');
     assert.equal(h.operation.reason, 'interrupted');
@@ -229,53 +232,20 @@ test('wrong tabs, subframes, stale runs and popup-spoofed finish events are igno
     assert.equal(h.operation.status, 'running');
   }
 });
-test('direct list recovery reads only the intended tab and observes its cooldown', async () => {
+test('list-route progress stays in the original scan tab', async () => {
   const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }],
     { status: 'running', tabId: 2, runId: 'recover', username: 'me' });
-  const request = { type: 'F4F_OPEN_LIST_PAGE', runId: 'recover', list: 'following',
-    collected: 108, expected: 114, deadline: h.now + 120000 };
-  h.response({});
-  await h.settle();
-  assert.equal((await h.dispatch(request, h.page(2))).reason, 'rate_limited');
-  assert.equal(h.calls.filter(call => call[0] === 'create').length, 0);
-  h.advance(60000);
-  assert.equal((await h.dispatch(request, h.page(2))).ok, true);
-  const listPage = h.operation.listPage;
   const url = 'https://www.instagram.com/me/following/';
-  assert.equal(h.tabs.get(listPage.tabId).url, url);
-  assert.equal((await h.dispatch(request, h.page(2))).ignored, true);
-
-  const route = { ...h.page(listPage.tabId), url };
-  const result = { type: 'F4F_LIST_PAGE_DONE', runId: 'recover', accounts: ['account_109'] };
-  assert.equal((await h.dispatch(result, route)).ignored, true);
-  h.tabs.get(listPage.tabId).status = 'complete';
-  h.update(listPage.tabId, { status: 'complete' });
+  const progress = { type: 'F4F_PROGRESS', runId: 'recover', list: 'following', collected: 108, expected: 114 };
+  h.update(2, { status: 'loading', url });
+  h.update(2, { status: 'complete' });
   await h.settle();
-  assert.equal(h.operation.listPage.started, true);
-  for (const sender of [h.page(2), { ...route, frameId: 1 }, { ...route, url: url.replace('/me/', '/another/') }]) {
-    assert.equal((await h.dispatch(result, sender)).ignored, true);
-  }
-  h.response({ tabId: listPage.tabId, type: 'main_frame', url, initiator: undefined,
-    responseHeaders: [{ name: 'Retry-After', value: '30' }] });
-  await h.settle();
-  assert.equal(h.operation.retryAt, h.now + 30000);
-  assert.ok(h.calls.some(call => call[0] === 'message' && call[1] === 2 && call[2].retryAt === h.operation.retryAt));
-
-  await h.dispatch(result, route);
-  assert.equal(h.operation.listPage, undefined);
   assert.equal(h.operation.status, 'running');
-  assert.ok(h.calls.some(call => call[0] === 'message' && call[1] === 2 && call[2].type === 'F4F_LIST_PAGE_RESULT' &&
-    call[2].accounts[0] === 'account_109'));
-  assert.equal(h.tabs.has(listPage.tabId), false);
-});
-test('losing the original scan tab cleans up its temporary list tab', async () => {
-  const h = harness([{ id: 7, url: 'https://www.instagram.com/me/' }, { id: 8, url: 'https://www.instagram.com/me/following/' }],
-    { status: 'running', tabId: 7, runId: 'recover', listPage: { tabId: 8 } });
-  h.remove(7);
-  await h.settle();
-  assert.equal(h.operation.reason, 'interrupted');
-  assert.equal(h.operation.listPage, undefined);
-  assert.equal(h.tabs.has(8), false);
+  assert.equal((await h.dispatch(progress, { ...h.page(3), url })).ignored, true);
+  const state = await h.dispatch(progress, { ...h.page(2), url });
+  assert.equal(state.tabId, 2);
+  assert.deepEqual({ ...state.progress }, { list: 'following', collected: 108 });
+  assert.ok(h.calls.every(call => call[0] !== 'create'));
 });
 test('switching active tabs never restarts, completes or intentionally hides the checker', async () => {
   const h = harness([{ id: 8, url: 'https://www.instagram.com/me/', active: false }],

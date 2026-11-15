@@ -1,6 +1,6 @@
 # F4F Checker privacy policy
 
-Last updated November 15, 2026. Covers F4F Checker 1.0.7 through 1.0.9.
+Last updated November 15, 2026. Covers F4F Checker 1.1.0.
 
 F4F Checker compares the following and follower lists shown in your signed-in Instagram session to identify accounts you follow that do not follow you back. The comparison runs in your browser when you start a check.
 
@@ -24,11 +24,9 @@ Your appearance preference is saved separately in local extension storage and re
 
 The extension has no developer-operated server, analytics or direct network client. It does not upload follower lists, results or page content to the developer. Its clicks and scrolling cause Instagram's own website to load data through your normal signed-in connection. Opening a result link visits that profile on Instagram. Instagram operates independently and its own terms and privacy policy apply.
 
-If a list remains short, the extension opens the direct Instagram list address in a temporary tab and reads the list there. It closes the tab after checking.
+The extension can use Instagram’s own list search in the scanning tab to verify a small number of usernames it has already read in your other list. Those search terms are sent to Instagram by its website.
 
-The extension can use Instagram’s own list search to verify a small number of usernames it has already read in your other list. Those search terms are sent to Instagram by its website.
-
-During a scan, the extension checks for HTTP 429 responses from Instagram in the checking tabs and reads the `Retry-After` header to decide when to resume.
+During a scan, the extension checks for HTTP 429 responses from Instagram in the checking tab and reads the `Retry-After` header to decide when to resume.
 
 The extension does not sell user data, transfer it for unrelated purposes, use it for advertising or use it to determine creditworthiness or make lending decisions. Information read by the extension is used only for the list-comparison feature and its controls.
 

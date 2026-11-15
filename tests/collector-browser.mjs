@@ -33,6 +33,7 @@ async function run(options, baseline = false, real = false) {
     followingEndVisits: __followingEndVisits, comparisonCreated: __comparisonCreated,
     searches: __searches,
     dialogsRemaining: document.querySelectorAll('[role="dialog"]:not([hidden])').length,
+    elapsedMs: Date.now() - __actions[0]?.at,
     listElapsedMs: Date.now() - window.__listOpenedAt,
     actions: __actions, waits: __waits, retryAt: __retryAt }));
   result.wallMs = Date.now() - started;
@@ -56,9 +57,11 @@ try {
     { name: '111 of 114 following rows need a fresh arrival at the end', size: 114, followingEnd: 'reenter' },
     { name: '108 of 114 need to leave the pagination preload zone before retrying', size: 114, followingEnd: 'deepReenter' },
     { name: 'six accounts reusing one plain link in a frame are all captured', size: 114, followingEnd: 'rapidRecycle' },
-    { name: 'duplicate server entries are reconciled by exact account searches', size: 114, reconcile: 'search' },
-    { name: 'missing followers are verified by the native Remove action', size: 114, reconcile: 'search', reconcileList: 'followers' },
+    { name: 'duplicate server entries are reconciled by exact account searches', size: 114, reconcile: 'search', caseVariants: true },
+    { name: 'missing followers are verified in the already open dialog', size: 114, reconcile: 'search', reconcileList: 'followers' },
     { name: 'duplicate server entries are reconciled from visible follow relationships', size: 114, reconcile: 'reverse' },
+    { name: 'checks skip Follow Back and defer deactivated accounts when the active candidates are enough', size: 114, reconcile: 'targeted' },
+    { name: 'exact searches wait for a visible loader before typing the next name', size: 114, reconcile: 'search', searchDelay: 11000 },
     { name: 'each stalled batch can be rechecked after more rows arrive', size: 114, followingEnd: 'multiple' },
     { name: 'pending 60-second following batch needs no fresh scroll', size: 114, followingEnd: 'pending', followingDelay: 60000 },
     { name: 'unmounted area below the last captured row is crossed in overlapping steps', size: 114, followingEnd: 'spacer' },
@@ -92,7 +95,8 @@ try {
     assert.equal(result.failed, undefined, `${options.name}: ${JSON.stringify(result)}`);
     assert.ok(result.done, `${options.name}: no completion`);
     assert.deepEqual(result.done.accounts, options.size === 0 ? [] : ['missing'], options.name);
-    assert.deepEqual(result.done.validation.followers, { expected: options.size - (options.smallerTotal || 0), collected: options.size });
+    const followerTotal = options.size + (options.reconcile === 'targeted' ? 2 : 0);
+    assert.deepEqual(result.done.validation.followers, { expected: followerTotal - (options.smallerTotal || 0), collected: followerTotal });
     if (options.mixedLinks || options.splitAccountLabels || options.outsideLinks) {
       const expected = options.mixedLinks || options.splitAccountLabels ? 114 : 25;
       assert.deepEqual(result.done.validation.following, { expected, collected: expected });
@@ -104,10 +108,15 @@ try {
     }
     if (options.reconcile) {
       assert.deepEqual(result.done.validation.following, { expected: 114, collected: 114 });
-      const searches = options.reconcile === 'search' ? ['account_00020', 'account_00021', 'account_00022'] : [];
+      const searches = options.reconcile === 'reverse' ? [] : ['account_00020', 'account_00021', 'account_00022'];
+      if (options.reconcile === 'targeted') searches.shift();
       assert.deepEqual(result.searches.map(search => search.value), searches);
       assert.ok(result.searches.every(search => search.list === (options.reconcileList || 'following')));
-      for (let i = 1; i < result.searches.length; i++) assert.ok(result.searches[i].at - result.searches[i - 1].at >= 1500);
+      for (let i = 1; i < result.searches.length; i++) {
+        assert.ok(result.searches[i].at - result.searches[i - 1].at >= (options.searchDelay || 1500));
+      }
+      if (!options.searchDelay) assert.ok(result.elapsedMs <= 70000, `recovery took ${result.elapsedMs} ms`);
+      if (options.reconcileList === 'followers') assert.equal(result.clicks.filter(click => click === 'open:followers').length, 1);
     }
     if (options.cooldown || options.cooldownOnOpen) {
       const pauseStarted = result.retryAt - (options.cooldown || options.cooldownOnOpen);
@@ -139,7 +148,7 @@ try {
     const followersOpen = result.actions.find(action => action.type === 'open' && action.list === 'followers');
     if (followingClose && followersOpen) assert.ok(followersOpen.at - followingClose.at >= 4000,
       `${options.name}: close/between-list delays were shortened`);
-    records.push({ name: options.name, status: 'verified', scrolls: result.scrolls, wallMs: result.wallMs });
+    records.push({ name: options.name, status: 'verified', scrolls: result.scrolls, elapsedMs: result.elapsedMs, wallMs: result.wallMs });
     console.log('PASS:', options.name);
   }
   for (const options of timingOnly ? [] : [
@@ -167,7 +176,8 @@ try {
       assert.equal(result.followingEndVisits, 2);
       assert.equal(result.actions.filter(action => action.list === 'following' && action.type === 'scroll').length, 3);
       const firstClose = result.actions.find(action => action.list === 'following' && action.type === 'close');
-      assert.ok(firstClose.at - result.actions[0].at <= 114000, 'the stalled following scan exceeded the wait budget');
+      const elapsed = firstClose.at - result.actions[0].at;
+      assert.ok(elapsed <= 30000, `the settled following scan took ${elapsed} ms`);
     }
     if (options.reconcile === 'invalid') {
       assert.match(result.failed.message, /verified 113 of 114 accounts you follow/);
