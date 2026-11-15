@@ -5,7 +5,7 @@
   let assisting = false;
   let claimed = false;
   let retryAt = 0;
-  let showingCooldown = false;
+  let cooldownNotice = '';
   let username = null;
   let waitStarted = Date.now();
   let lastReason = '';
@@ -40,7 +40,8 @@
     const copy = document.createElement('div');
     const title = document.createElement('strong');
     const incomplete = reason === 'incomplete_scan' || reason === 'unverified_count';
-    title.textContent = kind === 'running' ? 'Checking your Instagram lists' :
+    const waiting = reason === 'rate_limited' || reason === 'waiting_for_instagram';
+    title.textContent = kind === 'running' ? (waiting ? 'Waiting for Instagram' : 'Checking your Instagram lists') :
       kind === 'success' ? '✓ Checking Complete' : incomplete ? 'Incomplete scan' : 'Checking stopped';
     const text = document.createElement('p');
     text.textContent = message || 'F4F Checker is currently running. Please keep this Instagram tab open and active until the checking process is complete. Switching tabs may interrupt or delay the operation.';
@@ -166,11 +167,14 @@
     get retryAt() { return retryAt; },
     warning, decorate, output,
     async progress(list, collected, expected) {
-      if (showingCooldown && retryAt <= Date.now()) {
-        showingCooldown = false;
-        warning('running');
+      const state = await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => null);
+      if (!running || !cooldownNotice || state?.status !== 'running' || state.runId !== runId || state.retryAt !== retryAt) return;
+      if (state.reason && state.reason !== 'waiting_for_instagram') return;
+      const notice = state.reason ? state.message : '';
+      if (notice !== cooldownNotice) {
+        cooldownNotice = notice;
+        warning('running', notice, state.reason);
       }
-      await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => {});
     },
     async finish(box, validation) {
       decorate(box);
@@ -197,7 +201,7 @@
     } else if (message.type === 'F4F_ASSIST') {
       if (runId !== message.runId) {
         runId = message.runId; waitStarted = Date.now(); lastReason = ''; claimed = false;
-        retryAt = 0; showingCooldown = false;
+        retryAt = 0; cooldownNotice = '';
         username = null; clickedProfileFrom = null;
         resultBox?.remove(); resultBox = null;
       }
@@ -211,8 +215,8 @@
     } else if (message.type === 'F4F_RATE_LIMIT' && message.runId === runId && running) {
       if (message.retryAt > retryAt) {
         retryAt = message.retryAt;
-        showingCooldown = true;
-        warning('running', message.message);
+        cooldownNotice = message.message;
+        warning('running', cooldownNotice, 'rate_limited');
       }
       reply({ ok: true });
     } else if (message.type === 'F4F_ERROR' && message.runId === runId) {

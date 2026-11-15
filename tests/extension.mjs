@@ -270,13 +270,23 @@ try {
   const pauseView = await context.newPage();
   await pauseView.goto(`chrome-extension://${extensionId}/popup.html`);
   await pauseView.locator('#title').filter({ hasText: 'Instagram rate limit' }).waitFor({ timeout: 4000 });
+  assert.match(await pauseView.locator('#message').textContent(), /Next attempt after/);
   await limitedPage.bringToFront();
+  const waitingForRows = await waitForOperation(state => state?.reason === 'waiting_for_instagram', 15000);
+  assert.match(waitingForRows.message, /2 of 3/);
+  assert.equal(followingRequests.length, 1);
+  await pauseView.locator('#title').filter({ hasText: 'Waiting for Instagram' }).waitFor({ timeout: 4000 });
+  const accessibility = await context.newCDPSession(limitedPage);
+  const { nodes } = await accessibility.send('Accessibility.getFullAXTree');
+  assert.ok(nodes.some(node => node.name?.value === 'Waiting for Instagram'));
+  assert.ok(nodes.some(node => node.name?.value === waitingForRows.message));
+  await accessibility.detach();
   const resumed = await waitForOperation(state => state?.status === 'completed', 90000);
   assert.equal(followingRequests.length, 2);
   assert.ok(followingRequests[1] >= paused.retryAt, 'retried before Retry-After');
   assert.ok(followingRequests[1] < paused.retryAt + 30000, 'rescan fell back to the ordinary stall timeout');
   assert.deepEqual(resumed.validation.following, { expected: 3, collected: 3 });
   assert.deepEqual(resumed.results.accounts, [{ name: 'missing', href: '/missing' }, { name: 'later', href: '/later' }]);
-  console.log('PASS: real MV3 HTTP 429 and Retry-After → visible cooldown → same scan resumes with all three accounts.');
+  console.log('PASS: real MV3 HTTP 429 shows a next-attempt time and waits for new rows before resuming.');
   console.log('Isolated browser profile retained in the temporary directory; no signed-in profile was used.');
 } finally { await context.close(); server.close(); }

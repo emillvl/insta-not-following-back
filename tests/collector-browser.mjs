@@ -55,6 +55,8 @@ try {
     { name: 'a 60-second cooldown pauses pagination and preserves captured rows', size: 114, followingEnd: 'limited', cooldown: 60000 },
     { name: 'rate-limited opening retries after the cooldown', size: 114, cooldownOnOpen: 60000 },
     { name: 'rate-limited opening can recover an empty dialog', size: 114, cooldownOnOpen: 60000, emptyShell: true },
+    { name: 'rate-limited followers dialog stuck loading can recover from zero rows', size: 114,
+      cooldownOnOpen: 60000, limitedList: 'followers', emptyShell: true, busyShell: true },
     { name: '1000 cumulative', size: 1000 }, { name: '2000 cumulative', size: 2000 },
     { name: '10000 cumulative', size: 10000, batch: 250 },
     { name: '1000 virtual rows', size: 1000, mode: 'virtual' },
@@ -91,8 +93,13 @@ try {
     }
     if (options.cooldown || options.cooldownOnOpen) {
       const pauseStarted = result.retryAt - (options.cooldown || options.cooldownOnOpen);
-      const retries = result.actions.filter(action => action.list === 'following' && action.at > pauseStarted);
+      const retries = result.actions.filter(action => action.list === (options.limitedList || 'following') && action.at > pauseStarted);
       assert.ok(retries.length && retries.every(action => action.at >= result.retryAt), options.name);
+      if (options.busyShell) {
+        const opens = result.actions.filter(action => action.list === options.limitedList && action.type === 'open');
+        assert.equal(opens.length, 2);
+        assert.ok(opens[1].at >= result.retryAt + 45000);
+      }
     }
     if (options.followingEnd === 'spacer') {
       const steps = result.actions.filter(action => action.list === 'following' && action.type === 'scroll');
@@ -121,6 +128,8 @@ try {
     { name: 'stalled list', size: 1000, mode: 'stall', reason: 'incomplete_scan' },
     { name: '111 of 114 following rows remain incomplete after one recheck', size: 114, followingEnd: 'stall', reason: 'incomplete_scan' },
     { name: 'cooldown beyond the list deadline reports the rate limit', size: 114, followingEnd: 'limited', cooldown: 3600000, reason: 'rate_limited' },
+    { name: 'busy follower list remains at 0 of 114 after the allowed recovery', size: 114,
+      cooldownOnOpen: 60000, limitedList: 'followers', emptyShell: true, busyShell: true, staysEmpty: true, reason: 'incomplete_scan' },
     { name: 'unverifiable rounded total', size: 1000, rounded: true, reason: 'unverified_count' },
     { name: 'profile changes during scan', size: 1000, changedCount: true, reason: 'incomplete_scan' },
     { name: 'list closes during loading', size: 1000, delay: 18000, closeDuringLoad: true, reason: 'interrupted' },
@@ -142,6 +151,10 @@ try {
     if (options.cooldown) {
       assert.equal(result.followingEndVisits, 1);
       assert.match(result.failed.message, /Retry after/);
+    }
+    if (options.staysEmpty) {
+      assert.equal(result.clicks.filter(click => click === 'open:followers').length, 2);
+      assert.match(result.failed.message, /verified 0 of 114 followers/);
     }
     if (options.replaceDialog || options.closeDuringLoad) assert.ok(result.listElapsedMs <= 20000, `${options.name}: interruption was not bounded`);
     records.push({ name: options.name, status: options.reason, scrolls: result.scrolls, wallMs: result.wallMs });

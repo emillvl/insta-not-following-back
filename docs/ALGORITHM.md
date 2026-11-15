@@ -76,11 +76,13 @@ New accounts reset the stall timer and allow another recheck on a later batch.
 The worker observes first-party HTTP 429 responses in the top frame of the
 scanning tab. It honors `Retry-After` as seconds or an HTTP date and uses one-,
 two- and four-minute waits when no usable header is present. During the wait,
-the collector keeps observing rows and pauses list opening and scrolling. It
-then lets the list settle and rechecks the stalled batch. Each list has a
-20-minute deadline. If the requested cooldown exceeds the available time, the
-scan ends with a retry time. Empty lists skip opening, and short lists can
-settle without scrolling.
+the collector keeps observing rows and pauses list opening and scrolling. The
+banner shows the next attempt time. Once it elapses, a short list stays in
+Waiting for Instagram until the collected count grows. An empty dialog that
+still shows a loader can be reopened once after 45 more seconds of settled
+inactivity. Each list has a 20-minute deadline. If the requested cooldown
+exceeds the available time, the scan ends with a retry time. Empty lists skip
+opening, and short lists can settle without scrolling.
 
 The adapter requires the original result box and the collector's verified,
 settled evidence. The worker checks that evidence before saving results.

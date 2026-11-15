@@ -84,6 +84,7 @@ globalThis.F4FCollector = (() => {
   }
   async function waitForInstagram() {
     let retryAt = F4FBridge.retryAt || 0;
+    const wasWaiting = retryAt > Date.now();
     for (let remaining = retryAt - Date.now(); remaining > 0; remaining = retryAt - Date.now()) {
       if (retryAt >= current.deadline) {
         throw failure(`Instagram’s cooldown exceeds the time left to check ${current.type} (${current.users.size} of ${current.expected} collected). Retry after ${new Date(retryAt).toLocaleString()}.`, 'rate_limited');
@@ -91,6 +92,7 @@ globalThis.F4FCollector = (() => {
       await wait(Math.min(STEP_MS, remaining));
       retryAt = F4FBridge.retryAt || 0;
     }
+    if (wasWaiting) progress(true);
     return retryAt;
   }
   async function until(predicate, timeout, message) {
@@ -290,11 +292,12 @@ globalThis.F4FCollector = (() => {
         stalledAt ??= now;
         const stalledFor = now - stalledAt;
         if (stalledFor >= LOAD_STALL_MS) throw countError();
-        if (!pending && !rechecked && (resumedFromLimit || stalledFor >= RECHECK_MS)) {
-          if (atEnd && area && top > 2) {
+        if (!rechecked && (resumedFromLimit || stalledFor >= RECHECK_MS)) {
+          if (!pending && atEnd && area && top > 2) {
             rechecked = true; resumedFromLimit = false;
             area.scrollTop = Math.max(0, top - area.clientHeight);
-          } else if ((!area || bottom <= 2) && !validateSize()) {
+          } else if ((!area || bottom <= 2) && !validateSize() &&
+            (!pending || (resumedFromLimit && stalledFor >= RECHECK_MS))) {
             rechecked = true; resumedFromLimit = false;
             await closeDialog();
             await openDialog();

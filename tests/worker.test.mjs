@@ -89,8 +89,11 @@ test('only first-party 429s in the running tab pause the scan, honoring both Ret
   h.advance(120000);
   await h.dispatch(progress, h.page(2));
   assert.equal(h.operation.status, 'running');
-  assert.equal(h.operation.reason, undefined);
+  assert.equal(h.operation.reason, 'waiting_for_instagram');
   assert.match(h.operation.message, /111 of 114/);
+  await h.dispatch({ ...progress, collected: 112 }, h.page(2));
+  assert.equal(h.operation.reason, undefined);
+  assert.match(h.operation.message, /112 of 114/);
 });
 test('429s without a wait time back off and a stopped scan cannot restart during its cooldown', async () => {
   const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
@@ -109,6 +112,44 @@ test('429s without a wait time back off and a stopped scan cannot restart during
   h.advance(240000);
   const restarted = await h.dispatch({ type: 'F4F_START' });
   assert.notEqual(restarted.runId, 'scan');
+});
+test('a cooldown expiring with 0 of 114 followers stays in waiting until rows arrive', async () => {
+  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
+  const progress = { type: 'F4F_PROGRESS', runId: 'scan', list: 'followers', collected: 0, expected: 114 };
+  await h.dispatch(progress, h.page(2));
+  h.response({});
+  await h.settle();
+  assert.equal(h.operation.reason, 'rate_limited');
+  h.advance(60000);
+
+  await h.dispatch(progress, h.page(2));
+  assert.equal(h.operation.reason, 'waiting_for_instagram');
+  assert.match(h.operation.message, /0 of 114/);
+  await h.dispatch(progress, h.page(2));
+  assert.equal(h.operation.reason, 'waiting_for_instagram');
+
+  h.response({});
+  await h.settle();
+  assert.equal(h.operation.reason, 'rate_limited');
+  assert.equal(h.operation.retryAt, h.now + 120000);
+  h.advance(120000);
+  await h.dispatch(progress, h.page(2));
+  await h.dispatch({ ...progress, collected: 1 }, h.page(2));
+  assert.equal(h.operation.reason, undefined);
+  assert.match(h.operation.message, /1 of 114/);
+});
+test('a list that stays empty after a cooldown reports the stall without a comparison', async () => {
+  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
+  h.response({});
+  await h.settle();
+  h.advance(60000);
+  await h.dispatch({ type: 'F4F_PROGRESS', runId: 'scan', list: 'followers', collected: 0, expected: 114 }, h.page(2));
+  await h.dispatch({ type: 'F4F_FAILED', runId: 'scan', reason: 'incomplete_scan',
+    message: 'F4F Checker verified 0 of 114 followers. No comparison was made.' }, h.page(2));
+  assert.equal(h.operation.status, 'error');
+  assert.equal(h.operation.reason, 'incomplete_scan');
+  assert.match(h.operation.message, /stalled after the cooldown.+0 of 114 followers/);
+  assert.equal(h.operation.results, undefined);
 });
 test('start on another website reuses and foregrounds Instagram with no unrelated access', async () => {
   const h = harness([{ id: 1, url: 'https://youtube.com/', active: true },

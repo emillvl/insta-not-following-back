@@ -45,8 +45,9 @@ refresh any open Instagram tabs before starting.
   and select **Retry Checking**. When the account count falls short, the message
   shows the verified count and your profile total. Results require both lists to
   finish.
-- **Instagram rate limit.** Keep the tab open while the checker waits. If a
-  cooldown exceeds the scan's time limit, the extension shows when you can retry.
+- **Instagram rate limit.** Keep the tab open while the checker waits. The banner
+  shows the earliest time for the next attempt. **Waiting for Instagram** can
+  continue after that time if the list still needs more accounts.
 
 ## Checking
 

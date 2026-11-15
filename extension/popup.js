@@ -24,6 +24,7 @@ function render(next) {
   el('symbol').textContent = status === 'completed' ? '✓' : status === 'error' ? '!' : active ? '•••' : '↗';
   el('title').textContent = status === 'waiting' && next.reason === 'login_required' ?
     'Login required' : next.reason === 'rate_limited' ? 'Instagram rate limit' :
+    next.reason === 'waiting_for_instagram' ? 'Waiting for Instagram' :
     status === 'error' && ['incomplete_scan', 'unverified_count'].includes(next.reason) ?
     'Incomplete scan' : titles[status] || titles.idle;
   el('message').textContent = status === 'idle' ? 'See which accounts you follow don’t follow you back.' : next.message;

@@ -3,7 +3,6 @@ const IG_URLS = ['https://www.instagram.com/*', 'https://instagram.com/*'];
 const IG_ORIGIN = /^https:\/\/(www\.)?instagram\.com$/;
 const DEFAULT_LIMIT_WAIT_MS = 60000;
 const MAX_LIMIT_WAIT_MS = 4 * DEFAULT_LIMIT_WAIT_MS;
-const COOLDOWN_MESSAGE = 'Instagram is limiting requests. Checking will resume after the cooldown.';
 const idle = () => ({ status: 'idle', message: 'Ready when you are.' });
 const read = async () => (await chrome.storage.session.get('operation')).operation || idle();
 const save = async operation => {
@@ -37,9 +36,10 @@ async function pauseForRateLimit(tabId, headers, now) {
     retryAt = now + backoff;
   }
   if (retryAt <= currentRetry) return;
+  const message = `Instagram is limiting requests. Next attempt after ${new Date(retryAt).toLocaleString()}.`;
   void chrome.tabs.sendMessage(tabId, { type: 'F4F_RATE_LIMIT', runId: operation.runId,
-    retryAt, message: COOLDOWN_MESSAGE }, { frameId: 0 }).catch(() => {});
-  await save({ ...operation, retryAt, rateLimitBackoff: backoff, reason: 'rate_limited', message: COOLDOWN_MESSAGE });
+    retryAt, message }, { frameId: 0 }).catch(() => {});
+  await save({ ...operation, retryAt, rateLimitBackoff: backoff, reason: 'rate_limited', message });
 }
 function fromPopup(sender) {
   return sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('popup.html');
@@ -176,15 +176,26 @@ async function handle(message, sender) {
     return running;
   }
   if (message.type === 'F4F_PROGRESS' && operation.status === 'running') {
-    if (!['following', 'followers'].includes(message.list) ||
-      !Number.isSafeInteger(message.collected) || message.collected < 0 ||
-      !Number.isSafeInteger(message.expected) || message.expected < 0) return { ignored: true };
+    const { list, collected, expected } = message;
+    if (!['following', 'followers'].includes(list) ||
+      !Number.isSafeInteger(collected) || collected < 0 ||
+      !Number.isSafeInteger(expected) || expected < 0) return { ignored: true };
     if (operation.retryAt > Date.now()) return operation;
-    const list = message.list === 'following' ? 'accounts you follow' : 'followers';
-    const progress = message.collected > message.expected ?
-      `Checking ${list}… ${message.collected} found. Your profile shows ${message.expected}.` :
-      `Checking ${list}… ${message.collected} of ${message.expected} found.`;
-    return save({ ...operation, reason: undefined, message: progress });
+    const label = list === 'following' ? 'accounts you follow' : 'followers';
+    const count = collected > expected ? `${collected} found. Your profile shows ${expected}.` :
+      `${collected} of ${expected} found.`;
+    const progress = { list, collected };
+    const last = operation.progress;
+    const baseline = last?.list === list ? last.collected : 0;
+    const firstAfterCooldown = operation.reason === 'rate_limited';
+    if (collected < expected && (firstAfterCooldown ||
+      (operation.reason === 'waiting_for_instagram' && collected <= baseline))) {
+      const detail = `Waiting for Instagram to load ${label}. ${count}`;
+      if (operation.reason === 'waiting_for_instagram' && operation.message === detail) return operation;
+      return save({ ...operation, progress: firstAfterCooldown || last?.list !== list ? progress : last,
+        reason: 'waiting_for_instagram', message: detail });
+    }
+    return save({ ...operation, progress, reason: undefined, message: `Checking ${label}… ${count}` });
   }
   if (message.type === 'F4F_FINISHED' && operation.status === 'running') {
     const validation = message.validation;
@@ -207,7 +218,11 @@ async function handle(message, sender) {
       return fail(operation, 'The results exceed session storage capacity. The verified list is still on Instagram.', 'storage_error');
     }
   }
-  if (message.type === 'F4F_FAILED') return fail(operation, message.message || 'Checking failed.', message.reason);
+  if (message.type === 'F4F_FAILED') {
+    const detail = message.message || 'Checking failed.';
+    const stalledAfterWait = operation.reason === 'waiting_for_instagram' && message.reason === 'incomplete_scan';
+    return fail(operation, stalledAfterWait ? `Instagram’s list stalled after the cooldown. ${detail}` : detail, message.reason);
+  }
   return { ignored: true };
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {

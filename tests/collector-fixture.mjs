@@ -11,7 +11,8 @@ export function collectorFixture(options = {}) {
   const following=size===0?[]:[...(options.followingEnd||options.mixedLinks ? followers.slice(0,113) : mutual),'missing'];
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
   window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
-  window.__retryAt=0;window.__followingOpens=0;
+  window.__retryAt=0;
+  let limitedListOpens=0;
   new MutationObserver(records=>{
     for(const record of records)for(const node of record.addedNodes){
       if(node.nodeType===1&&node.querySelector('#closeF4FBox'))window.__comparisonCreated=true;
@@ -28,7 +29,8 @@ export function collectorFixture(options = {}) {
     if(type==='followers'&&options.exactTitle)control.title=String(names.length);
     control.onclick=event=>{
       event.preventDefault();__clicks.push('open:'+type);__actions.push({type:'open',list:type,at:Date.now()});
-      const limitedOpening=type==='following'&&++__followingOpens===1&&options.cooldownOnOpen;
+      const limitingList=options.cooldownOnOpen&&type===(options.limitedList||'following');
+      const limitedOpening=limitingList&&++limitedListOpens===1;
       if(limitedOpening){
         __retryAt=Date.now()+options.cooldownOnOpen;
         if(!options.emptyShell) return;
@@ -40,7 +42,10 @@ export function collectorFixture(options = {}) {
       const close=document.createElement('button');close.setAttribute('aria-label','Close');
       close.onclick=()=>{__clicks.push('close:'+type);__actions.push({type:'close',list:type,at:Date.now()});dialog.remove();
         if(type==='followers'&&options.changedCount)control.textContent=(names.length+1)+' followers';};
-      if(limitedOpening){dialog.append(close);host.append(dialog);return;}
+      if(limitedOpening||(limitingList&&options.staysEmpty)){
+        if(options.busyShell)dialog.setAttribute('aria-busy','true');
+        dialog.append(close);host.append(dialog);return;
+      }
       let list=document.createElement(options.semanticScroller&&type==='followers'?'section':'div');list.className='scroller';
       list.style.cssText='position:relative;height:'+(options.viewport??320)+'px;overflow-y:auto';
       if(options.hiddenScroller&&type==='followers')list.style.overflowY='hidden';
