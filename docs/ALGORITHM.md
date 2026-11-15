@@ -48,14 +48,17 @@ wait remain verbatim. The worker injects the production runner into Chrome's
 isolated content-script world.
 
 The collector uses the original 3,000 ms opening wait, 2,000 ms setup, 1,500 ms
-scroll cadence, 2,000 ms closing wait, and eight stable passes. Arriving data never
-shortens these waits. It captures mounted rows before scrolling and observes
-added, removed, and recycled rows, including old href values. Account links
+scroll cadence, and 2,000 ms closing wait. It uses seven stable passes for a
+verified end and eight before considering a short-list recovery. It captures
+mounted rows before scrolling and observes added, removed, and recycled rows,
+including old href values. Account links
 resolve to Instagram profile URLs. Plain links need an account-name label that
 matches the destination, including an exact username in a nested element. The
 collector treats usernames case-insensitively and retains insertion order.
 
-A cached last row guides scrolling through captured coverage. When the target
+A cached last row guides scrolling through captured coverage. The collector
+sends progress on count changes and reads relationship controls when they mount
+or change. When the target
 stops advancing, the collector waits for rendering, moves to the edge of the
 captured rows, and uses overlapping viewport steps to cross any remaining gap.
 The collector chooses a container that holds account rows and has a scroll
@@ -73,35 +76,49 @@ Persian, and fullwidth digits. Rounded values require an exact title or accessib
 value. Profile totals are read again before comparison. When a list settles
 short of its total, the collector can rewind to retrigger pagination in the
 original tab. It waits three paced passes at the settled end after that recheck.
-New rows allow another recheck for a later batch. A stall with visible loading
-or above the end still gets up to 90 seconds after the initial stable passes.
-An empty, settled dialog can be reopened once.
+New rows allow another recheck for a later batch. A visible loader pauses
+scrolling. A stall with visible loading or above the end gets up to 90 seconds
+after the initial stable passes. An empty dialog may be replayed once when its
+opening received HTTP 429 with a usable retry time.
 
 If the list has settled with fewer unique accounts than the profile count,
 the collector retains it and reads the other list. A Following action on a
-specific Followers row can verify that account as a mutual follow. A
-Follow Back or Requested action rules out a current outgoing follow. If a
+specific Followers row verifies an outgoing follow. Follow, Follow Back, and
+Requested rule out a current outgoing follow. A Follows you label on a Following
+row verifies an incoming follow. If a
 shortfall remains, the collector searches eligible usernames from the opposite
 list and skips rows marked deactivated. It hides the search dialog and makes it
 inert while verifying. A search result must match the username and expose an
 affirmative relationship for the list being checked. The collector can verify
 missing followers in the already open list.
-It limits a scan to 14 exact searches, spaces them at least 1,500 ms apart, and
-waits for visible search loaders before sending the next name. Both totals are
-checked again before comparison.
+It limits a scan to four exact search inputs. The fixtures need up to three
+distinct handles and the fourth input leaves room for one replay. It spaces
+inputs at least 1,500 ms apart and waits for visible search loaders before
+sending the next name. Both totals are checked again before comparison.
 
-The worker observes first-party HTTP 429 responses in the top frame of the
-scanning tab. It honors `Retry-After` as seconds or an HTTP date and uses one-,
-two- and four-minute waits when no usable header is present. During the wait,
-the collector keeps observing rows and pauses list opening, scrolling, and
-searches. The notice shows the HTTP 429 time and whether Instagram or the
-checker set the retry time. The popup and page notice update at expiry even
-without new rows. While a check is active, a short list shows Waiting for
-Instagram until more rows arrive. An empty dialog that
-still shows a loader can be reopened once after 45 more seconds of settled
-inactivity. Each list has a 20-minute deadline. If the requested cooldown
-exceeds the available time, the scan ends with a retry time. Empty lists skip
-opening, and short lists can settle without scrolling.
+The worker observes first-party XHR and fetch requests to the observed
+`/api/v1/friendships/<id>/following/` and `followers/` routes. The request must
+begin in the active scan's top-frame document. The worker tracks pending
+request IDs in session storage, including across worker restarts. A request's
+route identifies its list. A cursor or query parameter identifies pagination
+or search when present. [Chrome webRequest API](https://developer.chrome.com/docs/extensions/reference/api/webRequest)
+
+The first HTTP 429 stops the scan if there is no usable future `Retry-After`.
+Delay seconds and HTTP dates are accepted. [HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110.html#name-retry-after)
+
+Both lists and reconciliation
+share a 20-minute collection deadline. If a server wait fits, the worker
+allows one automatic retry after the latest deadline from the in-flight
+responses. The collector can continue reading mounted rows while list
+opening, scrolling, rewinds, and search inputs are paused. After the retry,
+another HTTP 429 stops collection. Long server waits end the check and keep
+manual retry gated until expiry.
+
+The popup and page show the rejection time, any deadline supplied by
+Instagram, and the manual retry action when a check stops. At expiry they
+update even if zero accounts arrived. Duplicate Start calls return to the
+active check. A full reload or tab closure stops collection and preserves an
+outstanding server wait. Empty lists skip opening.
 
 The adapter requires the original result box and the collector's verified,
 settled evidence. The worker checks that evidence before saving results.
@@ -114,8 +131,7 @@ account was exposed.
 
 ## Timing
 
-The current healthy two-account fixture uses the exact original wait sequence:
-two 3,000 ms waits, five 2,000 ms waits, and twenty-two 1,500 ms waits. Measured
-times were 49,123 ms for the original and 49,130 ms for the collector, with
-identical accounts and summary. The number of scroll passes depends on loading.
-These fixture measurements do not predict live Instagram completion times.
+The healthy two-account collector fixture keeps the opening, closing, and
+scroll cadence and spends one fewer quiet pass per list. That run took about
+46 seconds. See [Verification](VERIFICATION.md) for Chrome request counts,
+elapsed times, and the earlier build results.

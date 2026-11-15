@@ -8,20 +8,33 @@ const workerSource = readFileSync('extension/service-worker.js', 'utf8');
 const verified = { verified: true, settled: true, following: { expected: 2, collected: 2 }, followers: { expected: 1, collected: 1 } };
 function harness(initialTabs = [], initialOperation) {
   let operation = initialOperation;
+  let listRequests;
   let nextId = 100;
   const tabs = new Map(initialTabs.map(tab => [tab.id, { status: 'complete', windowId: 1, ...tab }]));
   const calls = [];
-  let handler, updated, removed, headersReceived;
+  let handler, updated, removed, headersReceived, beforeRequest, requestError;
   let now = Date.now();
+  if (operation?.status === 'running') {
+    operation = { documentId: `document-${operation.tabId}`, scanStartedAt: now - 1,
+      deadline: now + 1200000, ...operation };
+  }
   let probe = { runId: initialOperation?.runId, running: true };
   const chrome = {
     runtime: { getURL: path => `chrome-extension://test/${path}`,
       onMessage: { addListener: fn => { handler = fn; } } },
     storage: { session: {
-      get: async () => ({ operation }), set: async data => { operation = structuredClone(data.operation); }
+      get: async () => ({ operation, listRequests }),
+      set: async data => {
+        if (data.operation) operation = structuredClone(data.operation);
+        if (data.listRequests) listRequests = structuredClone(data.listRequests);
+      }
     } },
     action: { setBadgeText: async args => calls.push(['badge', args.text]), setBadgeBackgroundColor: async () => {} },
-    webRequest: { onHeadersReceived: { addListener: fn => { headersReceived = fn; } } },
+    webRequest: {
+      onBeforeRequest: { addListener: fn => { beforeRequest = fn; } },
+      onHeadersReceived: { addListener: fn => { headersReceived = fn; } },
+      onErrorOccurred: { addListener: fn => { requestError = fn; } }
+    },
     windows: { update: async (id, args) => { calls.push(['focus', id, args]); } },
     scripting: { executeScript: async args => { calls.push(['inject', args]); },
       insertCSS: async args => { calls.push(['style', args]); } },
@@ -47,153 +60,168 @@ function harness(initialTabs = [], initialOperation) {
       onRemoved: { addListener: fn => { removed = fn; } }
     }
   };
-  const context = vm.createContext({ chrome, crypto: webcrypto, console, URL, Date: class extends Date {
-    static now() { return now; }
-  } });
-  vm.runInContext(workerSource, context);
+  let context;
+  const restart = () => {
+    context = vm.createContext({ chrome, crypto: webcrypto, console, URL, Date: class extends Date {
+      static now() { return now; }
+    } });
+    vm.runInContext(workerSource, context);
+  };
+  restart();
   const popup = { url: 'chrome-extension://test/popup.html' };
-  const page = id => ({ tab: { id }, frameId: 0, url: 'https://www.instagram.com/me/' });
+  const page = id => ({ tab: { id }, frameId: 0, documentId: `document-${id}`, url: 'https://www.instagram.com/me/' });
   const dispatch = (message, sender = popup) => new Promise(resolve => handler(message, sender, resolve));
-  return { dispatch, page, tabs, calls, chrome, context,
+  let nextRequest = 0;
+  const begin = details => {
+    const request = { tabId: 2, frameId: 0, documentId: 'document-2', requestId: String(++nextRequest),
+      initiator: 'https://www.instagram.com', url: 'https://www.instagram.com/api/v1/friendships/123/following/', ...details };
+    beforeRequest(request);
+    return request;
+  };
+  const respond = (request, details) => headersReceived({ ...request, statusCode: 429, ...details });
+  return { dispatch, page, tabs, calls, chrome, restart, begin, respond,
     get now() { return now; },
     advance: ms => { now += ms; },
-    response: details => headersReceived({ tabId: 2, frameId: 0, statusCode: 429,
-      initiator: 'https://www.instagram.com', url: 'https://www.instagram.com/api/v1/friendships/123/following/', ...details }),
+    response: details => respond(begin(details), details),
+    requestError: details => requestError(details),
     get operation() { return operation; },
     set probe(value) { probe = value; },
     update: (id, change) => updated(id, change), remove: id => { tabs.delete(id); removed(id); },
     settle: async () => { await vm.runInContext('queue', context); } };
 }
-test('only first-party 429s in the running tab pause the scan, honoring both Retry-After formats', async () => {
-  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
-  h.response({ tabId: 99 });
-  h.response({ frameId: 1 });
-  h.response({ initiator: 'https://example.com' });
-  h.response({ statusCode: 200 });
-  await h.settle();
-  assert.equal(h.operation.retryAt, undefined);
+const scanning = () => harness([{ id: 2, url: 'https://www.instagram.com/me/' }],
+  { status: 'running', tabId: 2, runId: 'scan' });
+const retry = value => ({ responseHeaders: [{ name: 'Retry-After', value }] });
+const requestRetry = h => h.dispatch({ type: 'F4F_RETRY', runId: 'scan' }, h.page(2));
 
-  h.response({ responseHeaders: [{ name: 'Retry-After', value: '60' }] });
+test('only recognized top-frame list requests from the active document affect the scan', async () => {
+  const h = scanning();
+  for (const details of [{ tabId: 99 }, { frameId: 1 }, { documentId: 'stale' }, { statusCode: 200 },
+    { initiator: 'https://example.com' }, { url: 'https://www.instagram.com/graphql/query' },
+    { url: 'https://www.instagram.com/recommendations/friendships/123/following/' }]) h.response(details);
+  await h.settle();
+  assert.equal(h.operation.rateLimit, undefined);
+  h.response({ ...retry('60'), url: 'https://www.instagram.com/api/v1/friendships/123/following/?max_id=cursor' });
   await h.settle();
   assert.equal(h.operation.retryAt, h.now + 60000);
   assert.equal(h.operation.reason, 'rate_limited');
-  assert.deepEqual(h.operation.rateLimit, { receivedAt: h.now, list: 'following', advertised: true });
-  assert.match(h.operation.message, /HTTP 429 while loading Following/);
-  assert.match(h.operation.message, /Instagram supplied the retry time/);
-  assert.ok(h.calls.some(([type, id, message]) => type === 'message' && id === 2 &&
-    message.type === 'F4F_RATE_LIMIT' && message.runId === 'scan' && message.retryAt === h.operation.retryAt));
-  const later = new Date(h.now + 120000).toUTCString();
-  h.response({ responseHeaders: [{ name: 'retry-after', value: later }] });
-  h.response({ responseHeaders: [{ name: 'retry-after', value: '5' }] });
+  assert.deepEqual(h.operation.rateLimit, { receivedAt: h.now, list: 'following',
+    category: 'pagination', attempt: 0, noRetryTime: false });
+  assert.match(h.operation.message, /HTTP 429 while loading Following.+Instagram supplied the retry time/);
+  assert.equal((await requestRetry(h)).retryUsed, undefined);
+});
+
+test('in-flight responses share one decision and keep the latest header even after a worker restart', async () => {
+  const h = scanning();
+  const first = h.begin({});
+  const overlap = h.begin({});
+  h.respond(first, retry('2'));
+  await h.settle();
+  h.restart();
+  h.advance(2100);
+  assert.equal((await requestRetry(h)).retryUsed, undefined);
+  assert.equal(h.operation.reason, 'waiting_for_instagram');
+
+  const later = new Date(h.now + 90000).toUTCString();
+  h.respond(overlap, retry(later));
   await h.settle();
   assert.equal(h.operation.retryAt, Date.parse(later));
-
-  const progress = { type: 'F4F_PROGRESS', runId: 'scan', list: 'following', collected: 111, expected: 114 };
-  await h.dispatch(progress, h.page(2));
-  assert.equal(h.operation.reason, 'rate_limited');
-  h.advance(120000);
-  await h.dispatch(progress, h.page(2));
-  assert.equal(h.operation.status, 'running');
-  assert.equal(h.operation.reason, 'waiting_for_instagram');
-  assert.match(h.operation.message, /111 of 114/);
-  await h.dispatch({ ...progress, collected: 112 }, h.page(2));
-  assert.equal(h.operation.reason, undefined);
-  assert.match(h.operation.message, /112 of 114/);
-});
-test('429s without a wait time back off and a stopped scan cannot restart during its cooldown', async () => {
-  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
-  const delays = [60000, 120000, 240000, 240000];
-  for (const [index, delay] of delays.entries()) {
-    h.response({});
-    h.response({});
-    await h.settle();
-    assert.equal(h.operation.retryAt, h.now + delay);
-    if (index < delays.length - 1) h.advance(delay);
-  }
-  await h.dispatch({ type: 'F4F_FAILED', runId: 'scan', reason: 'rate_limited' }, h.page(2));
-  const gated = await h.dispatch({ type: 'F4F_START' });
-  assert.equal(gated.runId, 'scan');
-  assert.match(gated.message, /Retry after/);
-  h.advance(240000);
-  const restarted = await h.dispatch({ type: 'F4F_START' });
-  assert.notEqual(restarted.runId, 'scan');
-});
-test('a stopped scan clears an expired two-hour rate limit before another check', async () => {
-  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'first' });
-  h.response({ responseHeaders: [{ name: 'Retry-After', value: '7200' }] });
+  assert.equal((await requestRetry(h)).retryUsed, undefined);
+  h.advance(90000);
+  assert.equal((await requestRetry(h)).retryUsed, true);
+  h.restart();
+  assert.equal((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
+  h.response({ ...retry('3'), url: 'https://www.instagram.com/api/v1/friendships/123/followers/?query=synthetic' });
   await h.settle();
-  await h.dispatch({ type: 'F4F_FAILED', runId: 'first', reason: 'rate_limited' }, h.page(2));
+  assert.equal(h.operation.status, 'error');
+  assert.equal(h.operation.rateLimit.attempt, 1);
+  assert.equal(h.operation.rateLimit.list, 'followers');
+  assert.equal(h.operation.rateLimit.category, 'search');
+  assert.equal((await requestRetry(h)).status, 'error');
+  assert.equal((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
+});
+
+test('a missing, malformed or expired Retry-After stops immediately and allows a manual attempt', async () => {
+  for (const value of [undefined, '', '0', '1.5', '-10', '12/31/2099', 'Tue, 31 Feb 2099 00:00:00 GMT',
+    'Sunday, 06-Nov-94 08:49:37 GMT', 'tomorrow']) {
+    const h = scanning();
+    h.response(retry(value));
+    await h.settle();
+    assert.equal(h.operation.status, 'error', value);
+    assert.equal(h.operation.reason, 'rate_limited');
+    assert.equal(h.operation.retryAt, undefined);
+    assert.match(h.operation.message, /supplied no usable retry time.+Retry Checking/);
+    assert.equal((await requestRetry(h)).status, 'error');
+    h.probe = { runId: 'scan', running: false };
+    assert.notEqual((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
+  }
+});
+
+test('an unknown retry time stops an overlapping attempt and preserves an advertised later time', async () => {
+  const h = scanning();
+  const overlap = h.begin({});
+  h.response({});
+  await h.settle();
+  assert.equal(h.operation.status, 'error');
+  h.respond(overlap, retry('60'));
+  await h.settle();
+  assert.equal(h.operation.status, 'error');
+  assert.equal(h.operation.retryAt, h.now + 60000);
+  assert.match(h.operation.message, /no usable retry time.+Retry after/);
+  h.advance(60001);
+  assert.equal((await requestRetry(h)).status, 'error');
+});
+
+test('a long wait stops the check and expiry updates a stopped scan without a new Start', async () => {
+  const h = scanning();
+  h.response(retry('7200'));
+  await h.settle();
+  assert.equal(h.operation.status, 'error');
+  assert.match(h.operation.message, /exceeds the time left.+Retry after/);
   h.advance(3600000);
   assert.equal((await h.dispatch({ type: 'F4F_STATUS' })).reason, 'rate_limited');
-  h.advance(3600000);
+  assert.equal((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
+  h.advance(3600001);
   const expired = await h.dispatch({ type: 'F4F_STATUS' });
   assert.equal(expired.status, 'error');
   assert.equal(expired.reason, undefined);
-  assert.match(expired.message, /cooldown ended/);
-
+  assert.match(expired.message, /retry time has passed/);
+  h.probe = { runId: 'scan', running: false };
   const next = await h.dispatch({ type: 'F4F_START' });
-  assert.notEqual(next.runId, 'first');
+  assert.notEqual(next.runId, 'scan');
   assert.equal(next.retryAt, undefined);
-  await h.dispatch({ type: 'F4F_READY', runId: next.runId }, h.page(2));
-  h.response({ url: 'https://www.instagram.com/graphql/query' });
-  await h.settle();
-  assert.equal(h.operation.reason, 'rate_limited');
-  assert.equal(h.operation.retryAt, h.now + 60000);
-  assert.deepEqual(h.operation.rateLimit, { receivedAt: h.now, list: undefined, advertised: false });
-  assert.match(h.operation.message, /HTTP 429 in this tab/);
-  assert.match(h.operation.message, /The checker set the cooldown/);
 });
-test('status moves past a running cooldown even without new list progress', async () => {
-  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
-  const progress = { type: 'F4F_PROGRESS', runId: 'scan', list: 'followers', collected: 0, expected: 114 };
-  await h.dispatch(progress, h.page(2));
-  h.response({});
-  await h.settle();
-  assert.equal((await h.dispatch({ type: 'F4F_COOLDOWN_STATUS', runId: 'scan' }, h.page(2))).reason, 'rate_limited');
-  h.advance(60000);
-  const expired = await h.dispatch({ type: 'F4F_STATUS' });
-  assert.equal(expired.reason, 'waiting_for_instagram');
-  assert.match(expired.message, /0 of 114/);
-  await h.dispatch({ ...progress, collected: 1 }, h.page(2));
-  assert.equal(h.operation.reason, undefined);
-});
-test('a cooldown expiring with 0 of 114 followers stays in waiting until rows arrive', async () => {
-  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
-  const progress = { type: 'F4F_PROGRESS', runId: 'scan', list: 'followers', collected: 0, expected: 114 };
-  await h.dispatch(progress, h.page(2));
-  h.response({});
-  await h.settle();
-  assert.equal(h.operation.reason, 'rate_limited');
-  h.advance(60000);
 
+test('cooldown expiry updates zero-row progress and only new rows clear the waiting notice', async () => {
+  const h = scanning();
+  const progress = { type: 'F4F_PROGRESS', runId: 'scan', list: 'followers', collected: 0, expected: 114 };
   await h.dispatch(progress, h.page(2));
-  assert.equal(h.operation.reason, 'waiting_for_instagram');
+  const cancelled = h.begin({});
+  h.response(retry('3'));
+  await h.settle();
+  h.advance(3000);
+  assert.equal((await h.dispatch({ type: 'F4F_COOLDOWN_STATUS', runId: 'scan' }, h.page(2))).reason, 'waiting_for_instagram');
   assert.match(h.operation.message, /0 of 114/);
+  assert.equal((await requestRetry(h)).retryUsed, undefined);
+  h.requestError(cancelled);
+  await h.settle();
+  assert.equal((await requestRetry(h)).retryUsed, true);
   await h.dispatch(progress, h.page(2));
   assert.equal(h.operation.reason, 'waiting_for_instagram');
-
-  h.response({});
-  await h.settle();
-  assert.equal(h.operation.reason, 'rate_limited');
-  assert.equal(h.operation.retryAt, h.now + 120000);
-  h.advance(120000);
-  await h.dispatch(progress, h.page(2));
   await h.dispatch({ ...progress, collected: 1 }, h.page(2));
   assert.equal(h.operation.reason, undefined);
-  assert.match(h.operation.message, /1 of 114/);
 });
-test('a list that stays empty after a cooldown reports the stall without a comparison', async () => {
-  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
-  h.response({});
+
+test('the prior document cannot authorize a retry and reload preserves a known manual gate', async () => {
+  const h = scanning();
+  h.response(retry('60'));
   await h.settle();
-  h.advance(60000);
-  await h.dispatch({ type: 'F4F_PROGRESS', runId: 'scan', list: 'followers', collected: 0, expected: 114 }, h.page(2));
-  await h.dispatch({ type: 'F4F_FAILED', runId: 'scan', reason: 'incomplete_scan',
-    message: 'F4F Checker verified 0 of 114 followers. No comparison was made.' }, h.page(2));
-  assert.equal(h.operation.status, 'error');
-  assert.equal(h.operation.reason, 'incomplete_scan');
-  assert.match(h.operation.message, /stalled after the cooldown.+0 of 114 followers/);
-  assert.equal(h.operation.results, undefined);
+  const reloaded = { ...h.page(2), documentId: 'reloaded' };
+  assert.equal((await h.dispatch({ type: 'F4F_RETRY', runId: 'scan' }, reloaded)).ignored, true);
+  const state = await h.dispatch({ type: 'F4F_PAGE_LOADED' }, reloaded);
+  assert.equal(state.status, 'error');
+  assert.equal(state.retryAt, h.now + 60000);
+  assert.equal((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
 });
 test('start on another website reuses and foregrounds Instagram with no unrelated access', async () => {
   const h = harness([{ id: 1, url: 'https://youtube.com/', active: true },

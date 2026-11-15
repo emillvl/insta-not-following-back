@@ -14,20 +14,24 @@ globalThis.F4FAdapter = {
       }
     });
     try {
-      if (collector) await collector.prepare(() => bridge.running);
-      await checker({ document: adaptedDocument, alert: message => {
-        originalError = collector?.lastFailure || new Error(message);
-      } });
-      if (originalError) throw originalError;
-      const close = document.getElementById('closeF4FBox');
-      if (!close?.parentElement || !close.parentElement.querySelector('ul')) {
-        throw new Error('The original checker finished without its results window.');
+      let box, validation;
+      try {
+        if (collector) await collector.prepare(() => bridge.running);
+        await checker({ document: adaptedDocument, alert: message => {
+          originalError = collector?.lastFailure || new Error(message);
+        } });
+        if (originalError) throw originalError;
+        box = document.getElementById('closeF4FBox')?.parentElement;
+        if (!box?.querySelector('ul')) throw new Error('The original checker finished without its results window.');
+        if (!bridge.running) return;
+        validation = collector?.validation();
+      } finally {
+        collector?.dispose();
       }
-      if (!bridge.running) return;
-      await bridge.finish(close.parentElement, collector?.validation());
+      await bridge.finish(box, validation);
     } catch (error) {
       if (collector) document.getElementById('closeF4FBox')?.parentElement?.remove();
       await bridge.fail(error);
-    } finally { collector?.dispose(); this.executing = false; }
+    } finally { this.executing = false; }
   }
 };

@@ -16,7 +16,7 @@ You sign in directly on Instagram. The extension does not ask for your password,
 
 During a check, list entries are held in the page's memory. The extension keeps operation status, your username, account names and profile links in the result, counts, validation details, timestamps and tab identifiers in browser session storage. This lets progress and results remain available when you close and reopen the popup. Closing the popup does not erase them. Session storage is cleared when the browser session ends or the extension reloads; starting another check replaces the current operation. A result displayed in an Instagram page can remain there until the page is reloaded or closed.
 
-The current scan's rate-limit cooldown is kept in browser session storage so it survives closing the popup. The checker keeps the time of the HTTP 429 that set the current cooldown and the list type when it can identify it.
+The current scan's rate-limit notice and any retry time Instagram supplies are kept in browser session storage so they survive closing the popup. The checker records the time and category of the HTTP 429. Browser-assigned IDs for in-flight list requests are kept until those requests settle so overlapping responses can share a retry decision.
 
 Your appearance preference is saved separately in local extension storage and remains between browser sessions. Uninstalling the extension removes its extension storage through the browser.
 
@@ -26,7 +26,7 @@ The extension has no developer-operated server, analytics or direct network clie
 
 The extension can use Instagram’s own list search in the scanning tab to verify a small number of usernames it has already read in your other list. It skips rows marked deactivated. The website sends those search terms to Instagram.
 
-During a scan, the extension checks for HTTP 429 responses from Instagram in the checking tab and reads the `Retry-After` header to decide when to resume.
+During a scan, the extension observes recognized first-party list requests from the active Instagram document and reads the `Retry-After` header on HTTP 429 responses. It stops when Instagram supplies no usable retry time. The rate-limit record contains timing and request categories. It excludes request URLs, search terms, and response bodies.
 
 The extension does not sell user data, transfer it for unrelated purposes, use it for advertising or use it to determine creditworthiness or make lending decisions. Information read by the extension is used only for the list-comparison feature and its controls.
 

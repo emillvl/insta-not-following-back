@@ -4,9 +4,10 @@
   let running = false;
   let assisting = false;
   let claimed = false;
-  let retryAt = 0;
-  let cooldownNotice = '';
+  let deadline;
+  let rateStatus;
   let cooldownTimer;
+  let interruptWait;
   let username = null;
   let waitStarted = Date.now();
   let lastReason = '';
@@ -143,7 +144,7 @@
           if (!onOwnProfile && profile && clickedProfileFrom !== location.pathname) {
             clickedProfileFrom = location.pathname;
             await waitStatus('profile_navigation', 'Opening Instagram’s Profile section…');
-            profile.control.click();
+            if (runId === thisRun && !claimed) profile.control.click();
           } else {
             await waitStatus(onOwnProfile ? 'page_readiness' : 'waiting_profile', onOwnProfile ?
               'Waiting for your follower and following links…' : 'Waiting for Instagram’s Profile control…');
@@ -159,55 +160,79 @@
       }
     } catch (error) {
       await send({ type: 'F4F_FAILED', message: error.message }).catch(() => {});
-    } finally { assisting = false; }
+    } finally {
+      assisting = false;
+      if (thisRun !== runId) void assist();
+    }
   }
-  function showCooldownStatus(state) {
-    if (!cooldownNotice || state?.runId !== runId || state.retryAt !== retryAt) return;
-    if (!running && state.status === 'error' && !state.reason) {
-      cooldownNotice = '';
-      warning('error', state.message);
-      return;
-    }
-    if (!running || state.status !== 'running' || (state.reason && state.reason !== 'waiting_for_instagram')) return;
-    const notice = state.reason ? state.message : '';
-    if (notice !== cooldownNotice) {
-      cooldownNotice = notice;
-      warning('running', notice, state.reason);
-    }
+  function showRateStatus(state) {
+    if (state?.runId !== runId || !state.rateLimit) return;
+    if (rateStatus && (state.rateLimit.attempt < rateStatus.rateLimit.attempt ||
+      (rateStatus.retryUsed && !state.retryUsed) ||
+      (rateStatus.status === 'error' && state.status !== 'error') ||
+      (state.rateLimit.attempt === rateStatus.rateLimit.attempt && state.retryAt < rateStatus.retryAt))) return;
+    const notice = (state.reason || state.status === 'error') ? state.message : '';
+    const changed = notice !== rateStatus?.notice || state.status !== rateStatus?.status || state.reason !== rateStatus?.reason;
+    rateStatus = { status: state.status, retryAt: state.retryAt, retryUsed: state.retryUsed,
+      rateLimit: state.rateLimit, reason: state.reason, message: state.message, notice };
+    if (state.status === 'error') interruptWait?.();
+    clearTimeout(cooldownTimer);
+    if (state.reason === 'rate_limited' && state.retryAt) scheduleCooldownEnd();
+    if (changed) warning(state.status === 'error' ? 'error' : 'running', notice, state.reason);
   }
   function scheduleCooldownEnd() {
-    clearTimeout(cooldownTimer);
-    const remaining = retryAt - Date.now();
+    const remaining = rateStatus.retryAt - Date.now();
     if (remaining > 0) cooldownTimer = setTimeout(scheduleCooldownEnd, Math.min(remaining, 2 ** 31 - 1));
-    else void send({ type: 'F4F_COOLDOWN_STATUS' }).then(showCooldownStatus).catch(() => {});
+    else void send({ type: 'F4F_COOLDOWN_STATUS' }).then(showRateStatus).catch(() => {});
   }
   globalThis.F4FBridge = {
     get runId() { return runId; },
     get running() { return running; },
     get claimed() { return claimed; },
-    get retryAt() { return retryAt; },
+    get deadline() { return deadline; },
+    get rateStatus() { return rateStatus; },
     warning, decorate, output,
+    wait(ms) {
+      return new Promise(resolve => {
+        const timer = setTimeout(done, ms);
+        function done() {
+          clearTimeout(timer);
+          interruptWait = null;
+          resolve();
+        }
+        interruptWait = done;
+      });
+    },
+    async claimRetry() {
+      const state = await send({ type: 'F4F_RETRY' });
+      if (!state?.rateLimit) throw new Error('The Instagram check stopped. Use Retry Checking to try again.');
+      showRateStatus(state);
+    },
     async progress(list, collected, expected) {
       const state = await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => null);
-      showCooldownStatus(state);
+      if (rateStatus && state?.reason !== 'rate_limited') showRateStatus(state);
     },
     async finish(box, validation) {
       decorate(box);
       const response = await send({ type: 'F4F_FINISHED', results: output(box), validation });
       running = false;
       clearTimeout(cooldownTimer);
-      cooldownNotice = '';
       if (response.status !== 'completed') {
         if (validation && response.reason !== 'storage_error') { box.remove(); resultBox = null; }
-        warning('error', response.message || response.error || 'Results could not be saved. Please retry checking.', response.reason);
+        if (response.rateLimit && response.status === 'error') showRateStatus(response);
+        else warning('error', response.message || response.error || 'Results could not be saved. Please retry checking.', response.reason);
         return;
       }
+      rateStatus = null;
       warning('success', 'Your results are ready. Open F4F Checker to view them again.');
     },
     async fail(error) {
       running = false;
+      if (rateStatus?.status === 'error') return;
       warning('error', error.message, error.reason);
-      await send({ type: 'F4F_FAILED', message: error.message, reason: error.reason }).catch(() => {});
+      await send({ type: 'F4F_FAILED', message: error.message, reason: error.reason }).then(state => {
+        if (state?.reason === 'rate_limited') showRateStatus(state);
+      }).catch(() => {});
     }
   };
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
@@ -217,9 +242,12 @@
       waitStarted = Date.now(); lastReason = ''; clickedProfileFrom = null; reply({ ok: true });
     } else if (message.type === 'F4F_ASSIST') {
       if (runId !== message.runId) {
+        if (running) { reply({ ok: false }); return; }
         runId = message.runId; waitStarted = Date.now(); lastReason = ''; claimed = false;
-        retryAt = 0; cooldownNotice = '';
+        rateStatus = null;
         clearTimeout(cooldownTimer);
+        clearTimeout(bannerTimer);
+        document.getElementById('f4f-warning')?.remove();
         username = null; clickedProfileFrom = null;
         resultBox?.remove(); resultBox = null;
       }
@@ -229,25 +257,25 @@
     } else if (message.type === 'F4F_CLAIM') {
       const ok = message.runId === runId && !claimed && !running &&
         ready(username, F4FSelectors.currentOwnProfile(document) || F4FSelectors.ownProfile(document));
-      if (ok) { claimed = true; running = true; warning('running'); }
+      if (ok) { claimed = true; running = true; deadline = message.deadline; warning('running'); }
       reply({ ok });
-    } else if (message.type === 'F4F_RATE_LIMIT' && message.runId === runId && running) {
-      if (message.retryAt > retryAt) {
-        retryAt = message.retryAt;
-        cooldownNotice = message.message;
-        warning('running', cooldownNotice, 'rate_limited');
-        scheduleCooldownEnd();
-      }
+    } else if (message.type === 'F4F_RATE_LIMIT' && message.runId === runId) {
+      showRateStatus(message);
       reply({ ok: true });
     } else if (message.type === 'F4F_ERROR' && message.runId === runId) {
       running = false; claimed = true;
+      interruptWait?.();
+      clearTimeout(cooldownTimer);
       warning('error', message.message, message.reason);
-      if (message.reason === 'rate_limited' && cooldownNotice) scheduleCooldownEnd();
-      else { clearTimeout(cooldownTimer); cooldownNotice = ''; }
       reply({ ok: true });
     } else if (message.type === 'F4F_SHOW_RESULTS') {
       showResults(message.results); reply({ ok: true });
     }
   });
-  chrome.runtime.sendMessage({ type: 'F4F_PAGE_LOADED' }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'F4F_PAGE_LOADED' }).then(state => {
+    if (!runId && state?.status === 'error' && state.rateLimit) {
+      runId = state.runId;
+      showRateStatus(state);
+    }
+  }).catch(() => {});
 })();

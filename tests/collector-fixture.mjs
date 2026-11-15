@@ -6,12 +6,13 @@ export function collectorFixture(options = {}) {
   const options=${JSON.stringify(options)};
   const size=options.size??1000,batch=options.batch??100,mode=options.mode||'cumulative';
   const followers=Array.from({length:size},(_,i)=>'account_'+String(i).padStart(5,'0'));
-  const mutual=size>=200?[...followers.slice(0,97),followers[Math.floor(size/2)],followers[size-1]]:
+  const mutual=options.largeFollowing?followers.slice(0,-1):size>=200?[...followers.slice(0,97),followers[Math.floor(size/2)],followers[size-1]]:
     followers.slice(0,Math.min(99,size));
   const following=size===0?[]:[...(options.followingEnd||options.mixedLinks||options.splitAccountLabels||options.reconcile ? followers.slice(0,113) : mutual),'missing'];
   const reconcileList=options.reconcileList||'following';
   const omitted=(reconcileList==='following'?following:followers).slice(20,options.reconcile==='inactive'?21:23);
   if(options.reconcile==='targeted')followers.unshift('fan_only','deactivated_name');
+  window.__expectedLists={following,followers};
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
   window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
   window.__retryAt=0;
@@ -84,8 +85,11 @@ export function collectorFixture(options = {}) {
       const append=(node,values)=>{
         const target=inner&&node===list?inner:node;
         for(const name of values){
-          let label=type==='followers'&&(followerLabels[name]||
-            (options.reconcile==='reverse'&&omitted.includes(name)?'Following':''));
+          let label=type==='followers'&&followerLabels[name];
+          if(options.largeFollowing&&type==='following')label='Following';
+          if(options.reconcile==='reverse'&&type!==reconcileList&&omitted.includes(name)){
+            label=type==='followers'?'Following':'Follows you';
+          }
           if(options.reconcile==='inactive'&&type!==reconcileList){
             if(omitted.includes(name)||(type==='following'&&name==='missing'))label='Deactivated';
             else if(type==='followers'&&name===followers.at(-1))label='Follow Back';
@@ -105,6 +109,7 @@ export function collectorFixture(options = {}) {
             const render=()=>{
               dialog.removeAttribute('aria-busy');
               list.replaceChildren(relationshipRow(value,positive?label:'Follow'),relationshipRow('unrelated',label));
+              if(options.reconcile==='ambiguous'&&value===omitted[1])list.append(relationshipRow(value,'Follow Back'));
             };
             if(options.searchDelay){
               dialog.setAttribute('aria-busy','true');
@@ -157,7 +162,7 @@ export function collectorFixture(options = {}) {
           }
         }});
       }
-      else if(type==='following'||mode==='all'){
+      else if((type==='following'&&!options.largeFollowing)||mode==='all'){
         append(list,names);
         const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
         Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
@@ -245,8 +250,13 @@ export function collectorFixture(options = {}) {
       if(options.closeDuringLoad&&type==='followers')setTimeout(()=>dialog.remove(),500);
     };
   }
-  window.F4FBridge={claimed:true,running:true,
-    get retryAt(){return __retryAt;},
+  let retryUsed=false;
+  const deadline=Date.now()+20*60*1000;
+  window.F4FBridge={claimed:true,running:true,deadline,
+    get rateStatus(){return __retryAt?{retryAt:__retryAt,retryUsed,
+      status:__retryAt>=deadline?'error':'running',rateLimit:{list:options.limitedList||'following'},
+      message:'Retry after '+new Date(__retryAt).toLocaleString()}:null;},
+    claimRetry(){retryUsed=true;},
     progress:(list,collected,expected)=>__progress.push({list,collected,expected}),
     finish:(box,validation)=>{window.__done={heading:box.querySelector('h3').textContent,
       summary:box.querySelector('div').textContent.trim(),accounts:[...box.querySelectorAll('li a')].map(a=>a.textContent),validation};F4FBridge.running=false;},

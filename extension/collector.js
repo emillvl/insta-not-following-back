@@ -4,27 +4,27 @@ globalThis.F4FCollector = (() => {
   const DIALOG = '[role="dialog"]';
   const HIDDEN = '[hidden], [aria-hidden="true"]';
   const OPEN_MS = 3000, SETUP_MS = 2000, STEP_MS = 1500, CLOSE_MS = 2000;
-  const STABLE_PASSES = 8;
+  const STABLE_PASSES = 7, SHORT_STABLE_PASSES = 8;
   const SCROLL_STALL_MS = 3 * STEP_MS;
-  const SCROLL_GAP_MS = STABLE_PASSES * STEP_MS;
-  const BUSY_REOPEN_MS = 45000;
+  const SCROLL_GAP_MS = SHORT_STABLE_PASSES * STEP_MS;
   const LOAD_STALL_MS = 90000;
   const MAX_DIALOG_RECOVERIES = 4;
   const DIALOG_RECOVERY_MS = 3000;
-  const LIST_LIMIT_MS = 20 * 60 * 1000;
-  const MAX_EXACT_SEARCHES = 14;
+  const MAX_EXACT_SEARCHES = 4;
   const VERIFYING = 'data-f4f-verifying';
   const SEARCH_FIELDS = 'input[type="search"], input[type="text"], input:not([type])';
+  const STATUS_CONTROLS = 'button, [role="button"], [role="status"]';
   const INACTIVE_LABELS = new Set(['deactivated account', 'deactivated']);
+  const FOLLOWS_YOU = new Map([['follows you', true], ['seni takip ediyor', true]]);
   const RELATIONSHIPS = {
     following: new Map([
       ['following', true], ['takiptesin', true], ['takip ediliyor', true],
       ['follow', false], ['follow back', false], ['requested', false],
       ['takip et', false], ['geri takip et', false], ['istek gönderildi', false]
     ]),
-    followers: new Map([['remove', true], ['follows you', true], ['kaldır', true], ['seni takip ediyor', true]])
+    followers: new Map([...FOLLOWS_YOU, ['remove', true], ['kaldır', true]])
   };
-  let username, active, counts, current, lastFailure, lastProgress = 0;
+  let username, active, counts, deadline, current, lastFailure, lastProgress, searchesLeft;
   const lists = {};
   const inertDialogs = new Set();
   function failure(message, reason = 'incomplete_scan') {
@@ -33,18 +33,23 @@ globalThis.F4FCollector = (() => {
     return lastFailure;
   }
   function check() {
+    const rate = F4FBridge.rateStatus;
+    if (rate?.status === 'error' || (Date.now() >= deadline && rate && !rate.retryUsed)) {
+      throw failure(rate.message, 'rate_limited');
+    }
     const route = current && F4FSelectors.listFromHref(location.href);
     if (!active?.() || (F4FSelectors.usernameFromHref(location.href) !== username &&
       !(route?.username === username && route?.type === current?.type))) {
       throw failure('Checking was interrupted. Return to your profile and retry.', 'interrupted');
     }
-    if (current && Date.now() > current.deadline) {
+    if (current && Date.now() >= deadline) {
       throw failure(`The ${current.type} scan reached its time limit (${current.users.size} of ${current.expected} collected). Retry checking.`);
     }
   }
   function progress(force = false) {
-    if (!current || (!force && Date.now() - lastProgress < 1000)) return;
+    if (current.reported === current.users.size || (!force && Date.now() - lastProgress < 1000)) return;
     lastProgress = Date.now();
+    current.reported = current.users.size;
     void F4FBridge.progress?.(current.type, current.users.size, current.expected);
   }
   function accountName(anchor, href = anchor.getAttribute('href'), knownRow = false) {
@@ -58,7 +63,7 @@ globalThis.F4FCollector = (() => {
       .some(node => !node.closest(HIDDEN) && labeled(node)) ? name : null;
   }
   function captureScope() {
-    if (current.area) return current.dialog.contains(current.area) ? current.area : current.dialog;
+    if (current.area && current.dialog.contains(current.area)) return current.area;
     return current.hasViewport ? null : current.dialog;
   }
   function capture(node) {
@@ -72,15 +77,27 @@ globalThis.F4FCollector = (() => {
         current.lastRow.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) current.lastRow = anchor;
     };
     if (node.matches(ROWS)) row(node);
-    for (const anchor of node.querySelectorAll(ROWS)) row(anchor);
+    else for (const anchor of node.querySelectorAll(ROWS)) row(anchor);
+  }
+  function markEvidence(node, subtree = false) {
+    if (!current.evidenceControls || node?.nodeType !== 1) return;
+    const control = node.closest(STATUS_CONTROLS);
+    if (control) current.evidenceControls.add(control);
+    for (const related of current.rowControls.get(node) || []) current.evidenceControls.add(related);
+    if (subtree && node.childElementCount) {
+      for (const child of node.querySelectorAll(STATUS_CONTROLS)) current.evidenceControls.add(child);
+    }
   }
   function mutations(records) {
+    if (current.area && !current.dialog.contains(current.area)) {
+      bindArea(scrollArea(current.dialog));
+      capture(captureScope());
+    }
     const scope = captureScope();
     if (!scope) return;
     const before = current.users.size;
     for (const record of records) {
       if (!scope.contains(record.target)) continue;
-      current.evidenceDirty = true;
       const element = record.target.nodeType === 1 ? record.target : record.target.parentElement;
       const anchor = element?.closest(ROWS);
       if (record.type === 'attributes') {
@@ -88,11 +105,16 @@ globalThis.F4FCollector = (() => {
           const oldName = accountName(element, record.oldValue, current.accountLinks.has(element));
           if (oldName) current.users.add(oldName);
         }
-        if (record.attributeName === 'hidden' || record.attributeName === 'aria-hidden') capture(element);
+        if (record.attributeName === 'hidden' || record.attributeName === 'aria-hidden') {
+          capture(element);
+          markEvidence(element, true);
+        }
       }
       capture(anchor);
+      markEvidence(anchor);
+      if (element !== anchor) markEvidence(element);
       if (record.type === 'childList') {
-        for (const node of record.addedNodes) capture(node);
+        for (const node of record.addedNodes) { capture(node); markEvidence(node, true); }
         for (const node of record.removedNodes) capture(node);
       }
     }
@@ -103,28 +125,33 @@ globalThis.F4FCollector = (() => {
   }
   async function wait(ms) {
     check();
-    await new Promise(resolve => setTimeout(resolve, ms));
+    if (F4FBridge.wait) await F4FBridge.wait(ms);
+    else await new Promise(resolve => setTimeout(resolve, ms));
     check();
   }
+  function paused() {
+    return F4FBridge.rateStatus && !F4FBridge.rateStatus.retryUsed;
+  }
   async function waitForInstagram() {
-    let retryAt = F4FBridge.retryAt || 0;
-    const wasWaiting = retryAt > Date.now();
-    for (let remaining = retryAt - Date.now(); remaining > 0; remaining = retryAt - Date.now()) {
-      if (retryAt >= current.deadline) {
-        throw failure(`Instagram’s cooldown exceeds the time left to check ${current.type} (${current.users.size} of ${current.expected} collected). Retry after ${new Date(retryAt).toLocaleString()}.`, 'rate_limited');
+    check();
+    if (!paused()) return false;
+    while (paused()) {
+      const remaining = F4FBridge.rateStatus.retryAt - Date.now();
+      if (remaining > 0) await wait(Math.min(STEP_MS, remaining));
+      else {
+        await F4FBridge.claimRetry();
+        check();
+        if (paused()) await wait(STEP_MS);
       }
-      await wait(Math.min(STEP_MS, remaining));
-      retryAt = F4FBridge.retryAt || 0;
     }
-    if (wasWaiting) progress(true);
-    return retryAt;
+    return true;
   }
   async function until(predicate, timeout, message) {
     const end = Date.now() + timeout;
     while (!predicate()) {
       check();
       if (Date.now() >= end) throw failure(message, 'page_readiness');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await wait(100);
     }
   }
   function scrollArea(dialog) {
@@ -168,14 +195,15 @@ globalThis.F4FCollector = (() => {
     }
     current.area = area;
     current.lastRow = null;
-    current.evidenceDirty = true;
+    current.evidenceControls?.clear();
+    markEvidence(captureScope(), true);
   }
   function observeDialog(dialog) {
     const scan = current;
     scan.observer?.disconnect();
     scan.dialog = dialog;
     bindArea(scrollArea(dialog));
-    if (scan.area) capture(captureScope());
+    capture(captureScope());
     scan.observer = new MutationObserver(records => { if (current === scan) mutations(records); });
     scan.observer.observe(dialog, { subtree: true, childList: true, characterData: true, attributes: true,
       attributeOldValue: true, attributeFilter: ['href', 'role', 'aria-label', 'title', 'hidden', 'aria-hidden'] });
@@ -191,7 +219,7 @@ globalThis.F4FCollector = (() => {
       const dialog = listView();
       if (dialog) { observeDialog(dialog); return; }
       if (Date.now() >= end) throw failure(message, 'interrupted');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await wait(100);
     }
   }
   function listTitle(root, type) {
@@ -231,31 +259,46 @@ globalThis.F4FCollector = (() => {
     if (previous === undefined || state === 'inactive') states.set(name, state);
     else if (previous !== 'inactive' && previous !== state) states.set(name, null);
   }
-  function relationshipStates(scope, labels) {
+  function relationshipStates(scope, labels, controls = scope.querySelectorAll(STATUS_CONTROLS), rowControls) {
     const states = new Map();
-    for (const control of scope.querySelectorAll('button, [role="button"], [role="status"]')) {
-      const values = [control.innerText ?? control.textContent, control.getAttribute('aria-label'), control.getAttribute('title')]
+    for (const control of controls) {
+      if (!scope.contains(control)) continue;
+      const values = [control.childElementCount ? control.innerText : control.textContent,
+        control.getAttribute('aria-label'), control.getAttribute('title')]
         .map(text => text?.trim().toLowerCase().replace(/\u0307/g, ''));
-      const state = values.some(text => INACTIVE_LABELS.has(text)) ? 'inactive' :
-        labels?.get(values.find(text => labels.has(text)));
+      const inactive = values.some(text => INACTIVE_LABELS.has(text));
+      const positive = values.some(text => labels.get(text) === true);
+      const negative = values.some(text => labels.get(text) === false);
+      const state = inactive ? 'inactive' : positive && negative ? null : positive ? true : negative ? false : undefined;
       if (state === undefined || control.closest('header, nav, [role="tab"]') || !F4FSelectors.visible(control)) continue;
       for (let row = control.parentElement; row && row !== scope; row = row.parentElement) {
         if (row.querySelector(SEARCH_FIELDS)) break;
-        const names = new Set([...row.querySelectorAll(ROWS)].map(anchor => accountName(anchor)).filter(Boolean));
-        if (names.size === 1) recordState(states, names.values().next().value, state);
+        const links = [...row.querySelectorAll(ROWS)].map(anchor => [anchor, accountName(anchor)]).filter(([, name]) => name);
+        const names = new Set(links.map(([, name]) => name));
+        if (names.size === 1) {
+          recordState(states, names.values().next().value, state);
+          if (rowControls) {
+            for (const [anchor] of links) {
+              if (!rowControls.has(anchor)) rowControls.set(anchor, new Set());
+              rowControls.get(anchor).add(control);
+            }
+          }
+        }
         if (names.size) break;
       }
     }
     return states;
   }
   function rememberEvidence() {
-    const following = current.type === 'following';
-    if (!current.evidenceDirty || (!following && lists.following.accounts.length >= counts.following)) return;
-    current.evidenceDirty = false;
+    if (!current.evidenceControls?.size) return;
     const scope = captureScope();
-    if (!scope) return;
-    const labels = following ? undefined : RELATIONSHIPS.following;
-    for (const [name, state] of relationshipStates(scope, labels)) recordState(current.evidence, name, state);
+    const labels = current.type === 'following' ? FOLLOWS_YOU : RELATIONSHIPS.following;
+    if (scope) {
+      for (const [name, state] of relationshipStates(scope, labels, current.evidenceControls, current.rowControls)) {
+        recordState(current.evidence, name, state);
+      }
+    }
+    current.evidenceControls.clear();
   }
   function step(blockedFor) {
     const area = current.area;
@@ -275,6 +318,9 @@ globalThis.F4FCollector = (() => {
   }
   async function prepare(isActive) {
     dispose(); lastFailure = null; active = isActive; username = F4FSelectors.usernameFromHref(location.href);
+    deadline = F4FBridge.deadline ?? Date.now() + 20 * 60 * 1000;
+    searchesLeft = MAX_EXACT_SEARCHES;
+    lastProgress = 0;
     counts = {};
     for (const type of ['following', 'followers']) {
       counts[type] = F4FListControls.expectedCount(document, username, type);
@@ -288,9 +334,14 @@ globalThis.F4FCollector = (() => {
   async function open(type) {
     check();
     current = { type, expected: counts[type], users: new Set(), accountLinks: new WeakSet(), evidence: new Map(),
-      recoveries: 0, deadline: Date.now() + LIST_LIMIT_MS };
+      recoveries: 0 };
+    if (type === 'following' || lists.following.accounts.length < counts.following) {
+      current.evidenceControls = new Set();
+      current.rowControls = new WeakMap();
+    }
     progress(true);
     if (current.expected > 0) await openDialog();
+    else await waitForInstagram();
   }
   function clickListControl(control) {
     const link = control.closest('a[href]');
@@ -300,28 +351,33 @@ globalThis.F4FCollector = (() => {
   }
   async function openDialog(observe = true) {
     const { type } = current;
-    let clickedAfter = -1, openingDeadline = 0;
+    let openingDeadline = 0;
     while (true) {
-      check();
-      const retryAt = await waitForInstagram();
+      const retry = await waitForInstagram() && F4FBridge.rateStatus.rateLimit.list === type;
       let dialog = listView();
-      if (!dialog && retryAt > clickedAfter) {
+      if (retry && openingDeadline && dialog) {
+        if (observe && dialog === current.dialog && validateSize() && !loading(current.area)) return;
+        current.dialog = dialog;
+        await closeDialog();
+        dialog = null;
+      }
+      if (!dialog && (!openingDeadline || retry)) {
         const control = F4FListControls.find(document, username, type);
         if (!control) throw failure(`Instagram’s ${type} control is unavailable. Reload your profile and retry.`, 'page_readiness');
-        clickedAfter = retryAt;
         openingDeadline = Date.now() + 15000;
         clickListControl(control);
         dialog = listView();
       }
       if (dialog) {
-        current.handledLimit = clickedAfter;
         if (observe) observeDialog(dialog);
         else {
           current.dialog = dialog;
           concealDialog(dialog);
         }
         await wait(OPEN_MS);
-        return;
+        await wait(SETUP_MS);
+        if (!paused()) return;
+        continue;
       }
       if (Date.now() >= openingDeadline) throw failure(`Instagram’s ${type} dialog did not open. Retry checking.`, 'page_readiness');
       await wait(100);
@@ -330,18 +386,21 @@ globalThis.F4FCollector = (() => {
   async function collect() {
     check();
     if (current.expected === 0) return finishList();
-    await wait(SETUP_MS);
     let previousHeight = 0, previousSize = 0, noNewUsers = 0, stableLoops = 0;
-    let stalledAt = null, blockedAt = null, quietEndAt = null, rechecked = false, resumedFromLimit = false;
+    let stalledAt = null, blockedAt = null, quietEndAt = null, rechecked = false;
+    let retrySize = null, replayEnd = false;
     while (true) {
-      check();
-      const retryAt = await waitForInstagram();
-      if (retryAt > current.handledLimit) {
-        current.handledLimit = retryAt;
-        resumedFromLimit = true; rechecked = false;
+      if (await waitForInstagram() && F4FBridge.rateStatus.rateLimit.list === current.type) {
+        retrySize = current.users.size;
+        replayEnd = true;
         stalledAt = null; blockedAt = null; noNewUsers = 0; stableLoops = 0;
       }
-      if (!F4FSelectors.visible(current.dialog)) { await ensureDialog(); stableLoops = 0; noNewUsers = 0; }
+      if (!F4FSelectors.visible(current.dialog)) {
+        await ensureDialog();
+        // A limit may have arrived while waiting for the replacement.
+        stableLoops = 0; noNewUsers = 0;
+        continue;
+      }
       if (!current.dialog.contains(current.area) || !current.area.contains(current.lastRow) ||
         current.area.scrollHeight <= current.area.clientHeight) {
         const area = scrollArea(current.dialog);
@@ -350,44 +409,49 @@ globalThis.F4FCollector = (() => {
       }
       flush();
       rememberEvidence();
+      progress();
       const area = current.area;
       const height = area?.scrollHeight || 0;
       const bottom = area ? height - area.clientHeight : 0;
       const top = area?.scrollTop || 0;
       const atEnd = area ? top >= bottom - 2 : !current.hasViewport;
       const pending = loading(area);
+      const complete = validateSize();
       if (current.users.size > previousSize) {
-        stalledAt = null; rechecked = false; resumedFromLimit = false;
+        stalledAt = null; rechecked = false;
         current.recoveries = 0; noNewUsers = 0; stableLoops = 0;
       }
       if (height !== previousHeight) stableLoops = 0;
-      if (stableLoops >= STABLE_PASSES && atEnd && !pending && validateSize()) break;
+      if (stableLoops >= STABLE_PASSES && atEnd && !pending && complete) break;
 
       const now = Date.now();
       let moved = false;
-      if (area && top < bottom) {
-        if (!atEnd) moved = step(pending ? 0 : now - (blockedAt ?? now));
-        else if (!pending) { area.scrollTop = bottom; moved = true; }
+      if (replayEnd && !pending) {
+        replayEnd = false;
+        if (!complete && current.users.size === retrySize && atEnd && top > 2) {
+          area.scrollTop = 0;
+          await wait(STEP_MS);
+          continue;
+        }
+      }
+      if (area && top < bottom && !pending) {
+        if (!atEnd) moved = step(now - (blockedAt ?? now));
+        else if (!complete) { area.scrollTop = bottom; moved = true; }
         blockedAt = moved ? null : blockedAt ?? now;
       } else blockedAt = null;
 
-      if (moved || stableLoops < STABLE_PASSES) {
+      if (moved || stableLoops < SHORT_STABLE_PASSES) {
         stalledAt = null;
         quietEndAt = null;
       } else {
         stalledAt ??= now;
         const stalledFor = now - stalledAt;
         const settled = atEnd && !pending;
-        const reopen = !rechecked && bottom <= 2 && !current.users.size &&
-          (settled || (resumedFromLimit && stalledFor >= BUSY_REOPEN_MS));
-        if (reopen) {
-          rechecked = true; resumedFromLimit = false;
-          await closeDialog();
-          await openDialog();
-          await wait(SETUP_MS);
-          noNewUsers = 0; stableLoops = 0; blockedAt = null;
-        } else if (settled && !rechecked && top > 2) {
-          rechecked = true; resumedFromLimit = false;
+        if (settled && retrySize === current.users.size && !complete) {
+          throw countError(current.type, current.users.size, current.expected);
+        }
+        if (settled && !rechecked && top > 2 && !complete) {
+          rechecked = true;
           area.scrollTop = 0;
           quietEndAt = null;
         } else if (settled) {
@@ -402,7 +466,7 @@ globalThis.F4FCollector = (() => {
       flush();
       if (current.users.size === previousSize) noNewUsers++;
       else {
-        noNewUsers = 0; stalledAt = null; rechecked = false; resumedFromLimit = false;
+        noNewUsers = 0; stalledAt = null; rechecked = false;
         current.recoveries = 0;
       }
       const afterHeight = current.area?.scrollHeight || 0;
@@ -415,8 +479,8 @@ globalThis.F4FCollector = (() => {
   }
   function finishList() {
     const accounts = [...current.users];
-    const list = { accounts, deadline: current.deadline, evidence: current.evidence };
-    if (accounts.length < current.expected) list.searchable = Boolean(searchField(current.dialog));
+    const list = { accounts, evidence: current.evidence };
+    if (accounts.length < current.expected) list.searchable = Boolean(current.dialog && searchField(current.dialog));
     lists[current.type] = list;
     progress(true);
     return accounts;
@@ -430,6 +494,7 @@ globalThis.F4FCollector = (() => {
   }
   async function close() {
     if (!current) return;
+    await waitForInstagram();
     if (current.type === 'followers') {
       await reconcileLists();
       validation();
@@ -467,16 +532,27 @@ globalThis.F4FCollector = (() => {
   }
   async function searchExact(input, name) {
     const value = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-    value.set.call(input, name);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const typeName = field => {
+      searchesLeft--;
+      value.set.call(field, name);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    typeName(input);
     let quietPasses = 0, busySince = null;
     while (quietPasses < 4) {
       await wait(STEP_MS);
-      await waitForInstagram();
+      const retry = await waitForInstagram();
       const dialog = listView();
-      if (!dialog || searchField(dialog)?.value.toLowerCase() !== name) return null;
+      const field = dialog && searchField(dialog);
+      if (field?.value.toLowerCase() !== name) return null;
       current.dialog = dialog;
       concealDialog(dialog);
+      if (retry && F4FBridge.rateStatus.rateLimit.list === current.type) {
+        if (!searchesLeft) return null;
+        typeName(field);
+        quietPasses = 0; busySince = null;
+        continue;
+      }
       const area = scrollArea(dialog);
       if (loading(area)) {
         busySince ??= Date.now();
@@ -505,22 +581,19 @@ globalThis.F4FCollector = (() => {
     }
     const missing = counts[type] - list.accounts.length;
     if (missing <= 0) return [];
-    return list.searchable && candidates.length >= missing && candidates.length <= MAX_EXACT_SEARCHES &&
-      Date.now() < list.deadline ? candidates : null;
+    return list.searchable && candidates.length >= missing && candidates.length <= searchesLeft ? candidates : null;
   }
   async function verifyCandidates(candidates) {
     current.observer?.disconnect();
     const list = lists[current.type];
-    let searches = 0;
     for (const [index, name] of candidates.entries()) {
-      if (candidates.length - index < current.expected - list.accounts.length) break;
+      if (Math.min(candidates.length - index, searchesLeft) < current.expected - list.accounts.length) break;
       await waitForInstagram();
       const dialog = listView();
       const input = dialog && searchField(dialog);
       if (!input) break;
       current.dialog = dialog;
       concealDialog(dialog);
-      searches++;
       const confirmed = await searchExact(input, name);
       if (confirmed === null) break;
       if (!confirmed) continue;
@@ -529,29 +602,26 @@ globalThis.F4FCollector = (() => {
       progress(true);
       if (validateSize()) break;
     }
-    return searches;
   }
   async function reconcileLists() {
     const following = verificationCandidates('following');
     const followers = verificationCandidates('followers');
-    let searches = 0;
-    if (following && followers?.length) {
+    const canVerify = following && followers && following.length + followers.length <= searchesLeft;
+    if (canVerify && followers.length) {
       document.documentElement.setAttribute(VERIFYING, '');
-      searches = await verifyCandidates(followers);
+      await verifyCandidates(followers);
     }
     await closeDialog();
     current = null;
-    if (!following?.length || searches + following.length > MAX_EXACT_SEARCHES ||
+    if (!canVerify || !following.length || following.length > searchesLeft ||
       lists.followers.accounts.length < counts.followers) return;
 
     verifyProfileTotals();
     await wait(CLOSE_MS);
     document.documentElement.setAttribute(VERIFYING, '');
-    current = { type: 'following', expected: counts.following, users: new Set(lists.following.accounts),
-      deadline: lists.following.deadline };
+    current = { type: 'following', expected: counts.following, users: new Set(lists.following.accounts) };
     try {
       await openDialog(false);
-      await wait(SETUP_MS);
       await verifyCandidates(following);
     } catch (error) {
       if (error.reason !== 'page_readiness') throw error;
@@ -580,7 +650,10 @@ globalThis.F4FCollector = (() => {
   }
   function dispose() {
     current?.observer?.disconnect();
-    if (current?.dialog && F4FSelectors.visible(current.dialog)) { try { clickClose(current.dialog); } catch {} }
+    if (current?.dialog) {
+      const dialog = F4FSelectors.visible(current.dialog) ? current.dialog : listView();
+      if (dialog) { try { clickClose(dialog); } catch {} }
+    }
     for (const dialog of inertDialogs) dialog.inert = false;
     inertDialogs.clear();
     document.documentElement.removeAttribute(VERIFYING);

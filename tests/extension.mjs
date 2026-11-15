@@ -1,20 +1,10 @@
-import { createRequire } from 'node:module';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { createServer } from 'node:https';
 import assert from 'node:assert/strict';
+import { unpackedFixture } from './unpacked-fixture.mjs';
 
-const require = createRequire(import.meta.url);
-const { chromium } = require(process.env.F4F_PLAYWRIGHT_PATH || 'playwright');
-const channel = process.env.F4F_BROWSER_CHANNEL || 'msedge';
-const extensionPath = resolve('extension');
 const retrySeconds = 8;
 const followingPath = '/api/v1/friendships/123/following/';
 const followingRequests = [];
 const listNavigations = [];
-const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="sidebar"><a href="/me/"><span>Profile</span></a></div>
   <main><a id="edit" href="/accounts/edit/">Edit profile</a>
@@ -79,13 +69,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     }
   }
   </script></body></html>`;
-const key = join(profile, 'fixture-key.pem');
-const cert = join(profile, 'fixture-cert.pem');
-const openssl = process.env.F4F_OPENSSL_PATH || (process.platform === 'win32' ?
-  join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'usr', 'bin', 'openssl.exe') : 'openssl');
-execFileSync(openssl, ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key,
-  '-out', cert, '-days', '1', '-subj', '/CN=www.instagram.com'], { stdio: 'ignore' });
-const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }, (req, res) => {
+const fixture = await unpackedFixture((req, res) => {
   if (req.url === followingPath) {
     followingRequests.push(Date.now());
     if (followingRequests.length === 1) {
@@ -100,30 +84,14 @@ const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }
   }
   res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html);
 });
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const port = server.address().port;
-const extensionArgs = channel === 'chrome' ? ['--enable-unsafe-extension-debugging'] :
-  [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`];
-const context = await chromium.launchPersistentContext(profile, {
-  channel, headless: true,
-  ignoreDefaultArgs: ['--disable-extensions'], ignoreHTTPSErrors: true,
-  args: [...extensionArgs, '--disable-gpu', '--ignore-certificate-errors', '--no-proxy-server',
-    `--host-resolver-rules=MAP www.instagram.com 127.0.0.1:${port}, MAP instagram.com 127.0.0.1:${port}, MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1`]
-});
+const { context, worker, extensionId } = fixture;
 try {
-  if (channel === 'chrome') {
-    const session = await context.browser().newBrowserCDPSession();
-    await session.send('Extensions.loadUnpacked', { path: extensionPath });
-    await session.detach();
-  }
   await context.route(/^https?:\/\//, route => {
     const url = new URL(route.request().url());
     if (url.origin === 'https://www.instagram.com' && url.pathname === followingPath) return route.continue();
     if (url.origin === 'https://www.instagram.com' && /^\/me\/(following|followers)\/$/.test(url.pathname)) return route.continue();
     return route.fulfill({ contentType: 'text/html', body: html });
   });
-  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 10000 });
-  const extensionId = new URL(worker.url()).host;
   const accelerateTimers = tabId => worker.evaluate(id => chrome.scripting.executeScript({ target: { tabId: id }, func: () => {
     const native = globalThis.setTimeout;
     let now = Date.now();
@@ -348,7 +316,7 @@ try {
   const paused = await waitForOperation(state => state?.reason === 'rate_limited', 15000);
   assert.equal(paused.status, 'running');
   assert.equal(paused.rateLimit.list, 'following');
-  assert.equal(paused.rateLimit.advertised, true);
+  assert.equal(paused.rateLimit.noRetryTime, false);
   assert.ok(paused.rateLimit.receivedAt >= followingRequests[0]);
   assert.ok(paused.retryAt >= followingRequests[0] + retrySeconds * 1000);
   assert.equal(followingRequests.length, 1);
@@ -375,5 +343,15 @@ try {
   assert.deepEqual(resumed.validation.following, { expected: 3, collected: 3 });
   assert.deepEqual(resumed.results.accounts, [{ name: 'missing', href: '/missing' }, { name: 'later', href: '/later' }]);
   console.log('PASS: real MV3 HTTP 429 shows a next-attempt time and waits for new rows before resuming.');
+  const closeDuringScan = await context.newPage();
+  await closeDuringScan.goto(`chrome-extension://${extensionId}/popup.html`);
+  await closeDuringScan.locator('#again').click();
+  await waitForOperation(state => state?.status === 'running', 10000);
+  await limitedPage.close();
+  const closed = await waitForOperation(state => state?.status === 'error', 10000);
+  assert.equal(closed.reason, 'interrupted');
+  assert.equal(closed.results, undefined);
+  assert.equal(followingRequests.length, 2);
+  console.log('PASS: closing the active Instagram tab stops collection without restarting it.');
   console.log('Isolated browser profile retained in the temporary directory; no signed-in profile was used.');
-} finally { await context.close(); server.close(); }
+} finally { await fixture.close(); }

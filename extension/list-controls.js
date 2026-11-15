@@ -47,11 +47,11 @@ globalThis.F4FListControls = (() => {
   }
   function find(document, username, type) {
     const canonical = `/${username}/${type}/`;
-    const links = Array.from(document.querySelectorAll('a')).filter(link =>
-      !link.closest('article, [role="dialog"]') && F4FSelectors.visible(link));
-    const original = links.find(link => link.getAttribute('href') === canonical);
+    const links = [...document.querySelectorAll('a[href]')];
+    const usable = link => !link.closest('article, [role="dialog"]') && F4FSelectors.visible(link);
+    const original = links.find(link => link.getAttribute('href') === canonical && usable(link));
     if (original) return original;
-    const equivalent = links.find(link => sameListHref(link.getAttribute('href'), username, type));
+    const equivalent = links.find(link => sameListHref(link.getAttribute('href'), username, type) && usable(link));
     if (equivalent) return equivalent;
     const scope = document.querySelector('main, [role="main"]') || document;
     const candidates = new Set();

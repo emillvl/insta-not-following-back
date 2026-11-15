@@ -1,28 +1,53 @@
 import { createRequire } from 'node:module';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { collectorFixture } from './collector-fixture.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.F4F_PLAYWRIGHT_PATH || 'playwright');
 const browser = await chromium.launch({ channel: process.env.F4F_BROWSER_CHANNEL || 'msedge', headless: true });
 const records = [];
+const extensionPath = process.env.F4F_TEST_EXTENSION || 'extension';
+const scaleAudit = process.argv.includes('--scale-audit');
 async function run(options, baseline = false, real = false) {
   const page = await browser.newPage();
   if (!real) { await page.clock.install(); await page.clock.pauseAt(new Date(Date.now() + 1000)); }
   await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: collectorFixture(options) }));
   await page.goto('https://www.instagram.com/me/');
+  const perf = scaleAudit ? await page.context().newCDPSession(page) : null;
+  const performanceMetrics = async () => Object.fromEntries((await perf.send('Performance.getMetrics')).metrics
+    .map(({ name, value }) => [name, value]));
+  let before, heapSample;
+  if (perf) {
+    await perf.send('Performance.enable');
+    await perf.send('HeapProfiler.collectGarbage');
+    before = await performanceMetrics();
+    heapSample = before.JSHeapUsedSize;
+  }
   const started = Date.now();
   if (baseline) {
     void page.evaluate(readFileSync('f4fchecker.js', 'utf8')).catch(() => {});
   } else {
     for (const file of ['localization.js', 'list-controls.js', 'collector.js', 'adapter.js', 'safe-runner.js']) {
-      await page.addScriptTag({ content: readFileSync(`extension/${file}`, 'utf8') });
+      await page.addScriptTag({ content: readFileSync(join(extensionPath, file), 'utf8') });
+      if (file === 'collector.js' && (options.followingEnd === 'deepReenter' || options.reconcile)) {
+        await page.evaluate(() => {
+          window.__collected = [];
+          const collect = F4FCollector.collect;
+          F4FCollector.collect = async () => {
+            const names = await collect();
+            __collected.push(names);
+            return names;
+          };
+        });
+      }
     }
   }
   if (!real) {
     for (let i = 0; i < 2000; i++) {
       if (await page.evaluate(() => Boolean(window.__done || window.__failed || __alerts.length))) break;
       await page.clock.runFor(1000);
+      if (perf && i % 25 === 0) heapSample = Math.max(heapSample, (await performanceMetrics()).JSHeapUsedSize);
     }
   } else await page.waitForFunction(() => Boolean(window.__done || window.__failed || document.getElementById('closeF4FBox')), null, { timeout: 180000 });
   const result = await page.evaluate(() => ({ done: window.__done, failed: window.__failed,
@@ -37,13 +62,23 @@ async function run(options, baseline = false, real = false) {
     dialogsRemaining: document.querySelectorAll('[role="dialog"]:not([hidden])').length,
     elapsedMs: Date.now() - __actions[0]?.at,
     listElapsedMs: Date.now() - window.__listOpenedAt,
-    actions: __actions, waits: __waits, retryAt: __retryAt }));
+    actions: __actions, waits: __waits, retryAt: __retryAt, collected: window.__collected,
+    expected: window.__collected && Object.values(__expectedLists) }));
   result.wallMs = Date.now() - started;
+  if (perf) {
+    const after = await performanceMetrics();
+    await perf.send('HeapProfiler.collectGarbage');
+    const retained = await performanceMetrics();
+    result.performance = { scriptMs: Math.round((after.ScriptDuration - before.ScriptDuration) * 1000),
+      layouts: after.LayoutCount - before.LayoutCount,
+      sampledHeapMiB: Math.max(heapSample, after.JSHeapUsedSize) / 2 ** 20,
+      retainedHeapMiB: retained.JSHeapUsedSize / 2 ** 20 };
+  }
   await page.close();
   return result;
 }
 try {
-  const timingOnly = process.argv.includes('--timing-only');
+  const timingOnly = scaleAudit || process.argv.includes('--timing-only');
   const regressionOnly = process.argv.includes('--dialog-regressions');
   for (const options of timingOnly ? [] : [
     { name: 'all 114 following rows including absolute and native profile links', size: 114, mixedLinks: true },
@@ -62,6 +97,8 @@ try {
     { name: 'duplicate server entries are reconciled by exact account searches', size: 114, reconcile: 'search', caseVariants: true },
     { name: 'missing followers are verified in the already open dialog', size: 114, reconcile: 'search', reconcileList: 'followers' },
     { name: 'duplicate server entries are reconciled from visible follow relationships', size: 114, reconcile: 'reverse' },
+    { name: 'an explicit Follows you label verifies missing followers without searching', size: 114,
+      reconcile: 'reverse', reconcileList: 'followers' },
     { name: 'checks skip Follow Back and deactivated accounts while recovering active entries', size: 114, reconcile: 'targeted' },
     { name: 'exact searches wait for a visible loader before typing the next name', size: 114, reconcile: 'search', searchDelay: 11000 },
     { name: 'each stalled batch can be rechecked after more rows arrive', size: 114, followingEnd: 'multiple' },
@@ -109,6 +146,9 @@ try {
       const visits = { reenter: 2, deepReenter: 2, rapidRecycle: 1, multiple: 6, pending: 1, spacer: 1, footerLoader: 1, limited: 2 };
       assert.equal(result.followingEndVisits, visits[options.followingEnd]);
     }
+    if (result.collected) {
+      assert.deepEqual(result.collected.map(names => [...names].sort()), result.expected.map(names => [...names].sort()));
+    }
     if (options.reconcile) {
       assert.deepEqual(result.done.validation.following, { expected: 114, collected: 114 });
       const searches = options.reconcile === 'reverse' ? [] : ['account_00020', 'account_00021', 'account_00022'];
@@ -128,7 +168,7 @@ try {
       if (options.busyShell) {
         const opens = result.actions.filter(action => action.list === options.limitedList && action.type === 'open');
         assert.equal(opens.length, 2);
-        assert.ok(opens[1].at >= result.retryAt + 45000);
+        assert.ok(opens[1].at <= result.retryAt + 5000, 'replay the rejected opening once after expiry');
       }
     }
     if (options.followingEnd === 'spacer') {
@@ -159,6 +199,8 @@ try {
     { name: '111 of 114 following rows remain incomplete after one recheck', size: 114, followingEnd: 'stall', reason: 'incomplete_scan' },
     { name: 'an exact search suggestion without a following relationship is not accepted', size: 114,
       reconcile: 'invalid', reason: 'incomplete_scan' },
+    { name: 'conflicting relationship labels on exact search matches stay incomplete', size: 114,
+      reconcile: 'ambiguous', reason: 'incomplete_scan' },
     { name: 'a deactivated candidate is never searched for a missing Following entry', size: 114,
       reconcile: 'inactive', reason: 'incomplete_scan' },
     { name: 'deactivated candidates are never searched for a missing Followers entry', size: 114,
@@ -187,7 +229,7 @@ try {
       const elapsed = firstClose.at - result.actions[0].at;
       assert.ok(elapsed <= 30000, `the settled following scan took ${elapsed} ms`);
     }
-    if (options.reconcile === 'invalid') {
+    if (['invalid', 'ambiguous'].includes(options.reconcile)) {
       assert.match(result.failed.message, /verified 113 of 114 accounts you follow/);
       assert.ok(result.searches.some(search => search.value === 'account_00021'));
     }
@@ -217,14 +259,27 @@ try {
     assert.deepEqual(safer.done.accounts, ['missing']);
     assert.equal(original.originalSummary, safer.done.summary);
     if (process.argv.includes('--real-timing')) {
-      assert.deepEqual(safer.waits, original.waits, 'baseline healthy timer sequence must be restored exactly');
-      assert.ok(safer.wallMs >= 48900, 'baseline healthy run must not finish early');
+      assert.ok(safer.wallMs >= 45000 && safer.wallMs <= original.wallMs + 1000,
+        'small healthy scans should stay close to the baseline cadence');
     }
     records.push({ name: `unshortened healthy timing (${options.size} followers)`, originalMs: original.wallMs, validatedMs: safer.wallMs });
     console.log(`PASS: real timers; original ${original.wallMs}ms, validated ${safer.wallMs}ms; identical accounts.`);
   }
+  if (scaleAudit) {
+    for (const options of [
+      { name: 'cumulative 10,000 per list with row buttons', size: 10000, batch: 250, largeFollowing: true },
+      { name: 'virtual 10,000 followers', size: 10000, mode: 'virtual' }
+    ]) {
+      const result = await run(options);
+      assert.deepEqual(result.done?.accounts, ['missing'], JSON.stringify(result.failed));
+      assert.equal(result.done.validation.followers.collected, 10000);
+      if (options.largeFollowing) assert.equal(result.done.validation.following.collected, 10000);
+      records.push({ name: options.name, wallMs: result.wallMs, progressMessages: result.progress.length, ...result.performance });
+    }
+    console.log(JSON.stringify(records, null, 2));
+  }
   mkdirSync('artifacts', { recursive: true });
-  writeFileSync(process.argv.includes('--real-large') ? 'artifacts/collector-large-timing.json' :
-    'artifacts/collector-verification.json', JSON.stringify(records, null, 2));
+  const report = scaleAudit ? 'collector-scale' : process.argv.includes('--real-large') ? 'collector-large-timing' : 'collector-verification';
+  writeFileSync(`artifacts/${report}.json`, JSON.stringify(records, null, 2));
   console.log('Collector checks passed:', records.length, '(local fixtures; live Instagram loading is not simulated exactly).');
 } finally { await browser.close(); }

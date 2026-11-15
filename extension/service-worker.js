@@ -2,15 +2,21 @@ const ACTIVE = new Set(['navigating', 'waiting', 'running']);
 const IG_URLS = ['https://www.instagram.com/*', 'https://instagram.com/*'];
 const IG_ORIGIN = /^https:\/\/(www\.)?instagram\.com$/;
 const USERNAME = /^[a-zA-Z0-9._]{1,30}$/;
-const DEFAULT_LIMIT_WAIT_MS = 60000;
-const MAX_LIMIT_WAIT_MS = 4 * DEFAULT_LIMIT_WAIT_MS;
+const CHECK_LIMIT_MS = 20 * 60 * 1000;
+const LIST_TRAFFIC = { urls: IG_URLS.flatMap(site => ['following', 'followers'].map(list =>
+  site.replace('*', `api/v1/friendships/*/${list}*`))), types: ['xmlhttprequest'] };
 const idle = () => ({ status: 'idle', message: 'Ready when you are.' });
 const read = async () => (await chrome.storage.session.get('operation')).operation || idle();
+let lastBadge;
 const save = async operation => {
   await chrome.storage.session.set({ operation });
-  await chrome.action.setBadgeText({ text: operation.status === 'running' ? '…' :
-    operation.status === 'completed' ? '✓' : operation.status === 'error' ? '!' : '' });
-  await chrome.action.setBadgeBackgroundColor({ color: operation.status === 'error' ? '#B42318' : '#833AB4' });
+  const badge = operation.status === 'running' ? '…' :
+    operation.status === 'completed' ? '✓' : operation.status === 'error' ? '!' : '';
+  if (badge !== lastBadge) {
+    await chrome.action.setBadgeText({ text: badge });
+    await chrome.action.setBadgeBackgroundColor({ color: badge === '!' ? '#B42318' : '#833AB4' });
+    lastBadge = badge;
+  }
   return operation;
 };
 let queue = Promise.resolve();
@@ -20,18 +26,46 @@ function serialized(task) {
   return result;
 }
 function retryAfter(headers, now) {
-  const value = headers?.find(header => header.name.toLowerCase() === 'retry-after')?.value?.trim();
-  if (!value) return 0;
-  return /^\d+$/.test(value) ? Math.min(now + Number(value) * 1000, 8.64e15) : Date.parse(value);
+  let latest = 0;
+  for (const { name, value } of headers || []) {
+    if (name.toLowerCase() !== 'retry-after' || !value?.trim()) continue;
+    let text = value.trim();
+    if (/^\d+$/.test(text)) {
+      latest = Math.max(latest, Math.min(now + Number(text) * 1000, 8.64e15));
+      continue;
+    }
+    // Normalize the two legacy HTTP-date forms before validating the calendar date.
+    const rfc850 = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (\d\d)-(\w{3})-(\d\d) (\d\d:\d\d:\d\d) GMT$/.exec(text);
+    const asctime = /^(\w{3}) (\w{3}) ( \d|\d\d) (\d\d:\d\d:\d\d) (\d{4})$/.exec(text);
+    if (rfc850) {
+      const [, day, date, month, year, time] = rfc850;
+      const current = new Date(now).getUTCFullYear();
+      let fullYear = current - current % 100 + Number(year);
+      if (fullYear > current + 50) fullYear -= 100;
+      if (fullYear < current - 50) fullYear += 100;
+      text = `${day.slice(0, 3)}, ${date} ${month} ${fullYear} ${time} GMT`;
+    } else if (asctime) {
+      const [, day, month, date, time, year] = asctime;
+      text = `${day}, ${date.replace(' ', '0')} ${month} ${year} ${time} GMT`;
+    }
+    const time = Date.parse(text);
+    if (time > now && new Date(time).toUTCString() === text) latest = Math.max(latest, time);
+  }
+  return latest > now ? latest : 0;
 }
-function cooldownMessage(operation, action = 'Next attempt after') {
-  const when = new Date(operation.retryAt).toLocaleString();
-  const rateLimit = operation.rateLimit;
-  if (!rateLimit) return `Instagram is limiting requests. ${action} ${when}.`;
-  const request = rateLimit.list === 'following' ? 'while loading Following' :
-    rateLimit.list === 'followers' ? 'while loading Followers' : 'in this tab';
-  const source = rateLimit.advertised ? 'Instagram supplied the retry time.' : 'The checker set the cooldown.';
-  return `Instagram returned HTTP 429 ${request} at ${new Date(rateLimit.receivedAt).toLocaleString()}. ${action} ${when}. ${source}`;
+function cooldownMessage(operation) {
+  const { rateLimit, retryAt, status } = operation;
+  const list = rateLimit.list === 'following' ? 'Following' : 'Followers';
+  const message = [`Instagram returned HTTP 429 while loading ${list} at ${new Date(rateLimit.receivedAt).toLocaleString()}.`];
+  if (rateLimit.noRetryTime) message.push('Instagram supplied no usable retry time.');
+  if (rateLimit.attempt) message.push('This check used its automatic retry.');
+  else if (retryAt >= operation.deadline) message.push('The retry time exceeds the time left in this check.');
+  if (retryAt > Date.now()) {
+    const action = status === 'running' ? 'Next attempt after' : 'Retry after';
+    message.push(`${action} ${new Date(retryAt).toLocaleString()}. Instagram supplied the retry time.`);
+  } else if (retryAt) message.push('Instagram’s retry time has passed.');
+  if (status === 'error') message.push('Use Retry Checking in F4F Checker for a new attempt.');
+  return message.join(' ');
 }
 const listLabel = list => list === 'following' ? 'accounts you follow' : 'followers';
 const countDetail = ({ collected, expected }) => collected > expected ?
@@ -42,43 +76,80 @@ function waitingForList(progress) {
     'The cooldown ended. Waiting for Instagram to load the list.';
 }
 async function refreshCooldown(operation) {
-  if (operation.reason !== 'rate_limited' || !Number.isFinite(operation.retryAt) ||
-    operation.retryAt > Date.now()) return operation;
+  if (operation.reason !== 'rate_limited' || !operation.retryAt || operation.retryAt > Date.now()) return operation;
   const running = operation.status === 'running';
   return save({ ...operation, reason: running ? 'waiting_for_instagram' : undefined,
-    message: running ? waitingForList(operation.progress) : 'The Instagram cooldown ended. You can retry checking.' });
+    message: running ? waitingForList(operation.progress) : cooldownMessage(operation) });
 }
-async function pauseForRateLimit({ tabId, responseHeaders, url }, now) {
-  const operation = await read();
-  if (operation.status !== 'running' || tabId !== operation.tabId || operation.startedAt > now) return;
-  const currentRetry = operation.retryAt || 0;
-  const serverTime = retryAfter(responseHeaders, now);
-  const advertised = serverTime > now;
-  let backoff = operation.rateLimitBackoff || 0;
-  let retryAt = serverTime;
-  if (!advertised) {
-    if (currentRetry > now) return;
-    backoff = backoff ? Math.min(2 * backoff, MAX_LIMIT_WAIT_MS) : DEFAULT_LIMIT_WAIT_MS;
-    retryAt = now + backoff;
-  }
-  if (retryAt <= currentRetry) return;
-  const list = new URL(url).pathname.match(/\/friendships\/\d+\/(following|followers)\/?$/)?.[1];
-  const next = { ...operation, retryAt, rateLimitBackoff: backoff, reason: 'rate_limited',
-    rateLimit: { receivedAt: now, list, advertised } };
+async function reportRateLimit(operation) {
+  const next = { ...operation, reason: 'rate_limited' };
   next.message = cooldownMessage(next);
-  void chrome.tabs.sendMessage(tabId, { type: 'F4F_RATE_LIMIT', runId: operation.runId,
-    retryAt, message: next.message }, { frameId: 0 }).catch(() => {});
+  const { runId, status, reason, retryAt, retryUsed, rateLimit, message } = next;
+  void chrome.tabs.sendMessage(next.tabId, { type: 'F4F_RATE_LIMIT', runId, status, reason,
+    retryAt, retryUsed, rateLimit, message }, { frameId: 0, documentId: next.documentId }).catch(() => {});
   await save(next);
+  return next;
+}
+function requestCategory(details) {
+  if (details.frameId !== 0 || details.tabId < 0 || !IG_ORIGIN.test(details.initiator || '')) return null;
+  const url = new URL(details.url);
+  const list = url.pathname.match(/^\/api\/v1\/friendships\/\d+\/(following|followers)\/?$/)?.[1];
+  if (!list || !IG_ORIGIN.test(url.origin)) return null;
+  return { list, category: url.searchParams.has('query') ? 'search' :
+    url.searchParams.has('max_id') ? 'pagination' : 'list' };
+}
+async function trackListRequest(details, category, now, starting) {
+  const { operation, listRequests } = await chrome.storage.session.get(['operation', 'listRequests']);
+  if (!operation || operation.tabId !== details.tabId || operation.documentId !== details.documentId ||
+    now < operation.scanStartedAt) return;
+  const ids = listRequests?.runId === operation.runId ? listRequests.ids : [];
+  if (starting) {
+    if (operation.status === 'running' && !ids.includes(details.requestId)) {
+      await chrome.storage.session.set({ listRequests: { runId: operation.runId, ids: [...ids, details.requestId] } });
+    }
+    return;
+  }
+  if (!ids.includes(details.requestId)) return;
+  await chrome.storage.session.set({ listRequests: { runId: operation.runId,
+    ids: ids.filter(id => id !== details.requestId) } });
+  if (details.statusCode !== 429 ||
+    (operation.status !== 'running' && !(operation.status === 'error' && operation.rateLimit))) return;
+
+  const attempt = operation.retryUsed ? 1 : 0;
+  const previous = operation.rateLimit?.attempt === attempt ? operation.rateLimit : null;
+  const serverTime = retryAfter(details.responseHeaders, now);
+  const retryAt = Math.max(previous ? operation.retryAt || 0 : 0, serverTime) || undefined;
+  const rateLimit = { ...(previous || { ...category, attempt, receivedAt: now }),
+    noRetryTime: Boolean(previous?.noRetryTime || !serverTime) };
+  const stop = operation.status !== 'running' || rateLimit.noRetryTime || operation.retryUsed ||
+    retryAt >= operation.deadline;
+  if (previous && previous.noRetryTime === rateLimit.noRetryTime && retryAt === operation.retryAt) return;
+  await reportRateLimit({ ...operation, status: stop ? 'error' : 'running', rateLimit, retryAt });
+}
+async function claimRetry(operation) {
+  if (operation.status !== 'running' || !operation.rateLimit || operation.retryUsed ||
+    operation.retryAt > Date.now()) return operation;
+  if (Date.now() >= operation.deadline) return reportRateLimit({ ...operation, status: 'error' });
+  const { listRequests } = await chrome.storage.session.get('listRequests');
+  const next = await refreshCooldown(operation);
+  // All requests issued before the retry must settle, including other requests
+  // from the same site action whose Retry-After could arrive later.
+  if (listRequests?.runId === operation.runId && listRequests.ids.length) return next;
+  return save({ ...next, retryUsed: true });
 }
 function fromPopup(sender) {
   return sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL('popup.html');
 }
 function fromPage(sender, operation, message) {
   return sender.frameId === 0 && sender.tab?.id === operation.tabId &&
+    (!operation.documentId || sender.documentId === operation.documentId) &&
     message.runId === operation.runId && /^https:\/\/(www\.)?instagram\.com\//.test(sender.url || '');
 }
 async function fail(operation, message, reason = 'checker_error') {
   if (!ACTIVE.has(operation.status)) return operation;
+  if (operation.rateLimit && (operation.retryAt > Date.now() || reason === 'rate_limited')) {
+    return reportRateLimit({ ...operation, status: 'error' });
+  }
   const error = await save({ ...operation, status: 'error', message, reason, results: undefined });
   if (operation.tabId) chrome.tabs.sendMessage(operation.tabId, {
     type: 'F4F_ERROR', runId: operation.runId, message, reason
@@ -108,12 +179,15 @@ async function assist(operation) {
 async function start() {
   const previous = await refreshCooldown(await read());
   if (ACTIVE.has(previous.status)) {
-    if (previous.tabId) await foreground(previous.tabId);
-    return previous;
+    try {
+      if (previous.tabId) await foreground(previous.tabId);
+      return previous;
+    } catch { return fail(previous, 'The Instagram tab is unavailable. Please retry.', 'interrupted'); }
   }
-  if (previous.retryAt > Date.now()) {
-    return previous.reason === 'rate_limited' ? previous :
-      save({ ...previous, reason: 'rate_limited', message: cooldownMessage(previous, 'Retry after') });
+  if (previous.retryAt > Date.now()) return previous;
+  if (previous.status === 'error' && previous.tabId) {
+    const probe = await chrome.tabs.sendMessage(previous.tabId, { type: 'F4F_PING' }).catch(() => null);
+    if (probe?.running && probe.runId === previous.runId) return previous;
   }
   let operation = await save({ status: 'navigating', message: 'Opening Instagram…',
     runId: crypto.randomUUID(), startedAt: Date.now(), username: null });
@@ -183,15 +257,19 @@ async function handle(message, sender) {
   }
   const operation = await read();
   if (message.type === 'F4F_PAGE_LOADED' && sender.frameId === 0 && sender.tab?.id === operation.tabId) {
+    if (operation.status === 'running' && operation.documentId && operation.documentId !== sender.documentId) {
+      return fail(operation, 'The Instagram page changed and checking stopped. Please retry.', 'interrupted');
+    }
     if (operation.status === 'waiting') await assist(operation);
     if (operation.status === 'completed' && operation.showResultsOnLoad) {
       await chrome.tabs.sendMessage(operation.tabId, { type: 'F4F_SHOW_RESULTS', results: operation.results });
       await save({ ...operation, showResultsOnLoad: false });
     }
-    return { ok: true };
+    return operation.status === 'error' && operation.rateLimit ? refreshCooldown(operation) : { ok: true };
   }
   if (!fromPage(sender, operation, message)) return { ignored: true };
   if (message.type === 'F4F_COOLDOWN_STATUS') return refreshCooldown(operation);
+  if (message.type === 'F4F_RETRY') return claimRetry(operation);
   if (message.type === 'F4F_WAIT_STATUS' && operation.status === 'waiting') {
     const username = message.reason === 'profile_navigation' &&
       typeof message.username === 'string' && USERNAME.test(message.username) ?
@@ -200,13 +278,17 @@ async function handle(message, sender) {
   }
   if (message.type === 'F4F_READY' && operation.status === 'waiting') {
     await foreground(operation.tabId);
-    const claim = await chrome.tabs.sendMessage(operation.tabId, { type: 'F4F_CLAIM', runId: operation.runId });
+    const scanStartedAt = Date.now(), deadline = scanStartedAt + CHECK_LIMIT_MS;
+    const claim = await chrome.tabs.sendMessage(operation.tabId, { type: 'F4F_CLAIM', runId: operation.runId, deadline },
+      { frameId: 0, documentId: sender.documentId });
     if (!claim.ok) return fail(operation, 'The profile is no longer ready. Please retry.', 'readiness_error');
     const username = new URL(sender.url).pathname.match(/^\/([a-zA-Z0-9._]{1,30})\/?$/)?.[1];
-    const running = await save({ ...operation, username, status: 'running', reason: undefined,
+    const running = await save({ ...operation, username, documentId: sender.documentId, scanStartedAt, deadline,
+      status: 'running', reason: undefined,
       message: 'Checking following, then followers…' });
     try {
-      await chrome.scripting.executeScript({ target: { tabId: operation.tabId },
+      const target = sender.documentId ? { tabId: operation.tabId, documentIds: [sender.documentId] } : { tabId: operation.tabId };
+      await chrome.scripting.executeScript({ target,
         files: ['collector.js', 'adapter.js', 'safe-runner.js'] });
     } catch (error) { return fail(running, error.message, 'injection_error'); }
     return running;
@@ -217,25 +299,21 @@ async function handle(message, sender) {
       !Number.isSafeInteger(collected) || collected < 0 ||
       !Number.isSafeInteger(expected) || expected < 0) return { ignored: true };
     const progress = { list, collected, expected };
-    const last = operation.progress;
-    if (operation.retryAt > Date.now()) {
-      if (last?.list === list && last.collected === collected && last.expected === expected) return operation;
-      return save({ ...operation, progress });
+    const state = await refreshCooldown(operation);
+    const last = state.progress;
+    if (last?.list === list && last.collected === collected && last.expected === expected) return state;
+    if (state.rateLimit && !state.retryUsed) {
+      return save({ ...state, progress, message: state.reason === 'waiting_for_instagram' ?
+        waitingForList(progress) : state.message });
     }
-    const baseline = last?.list === list ? last.collected : 0;
-    const firstAfterCooldown = operation.reason === 'rate_limited';
-    if (collected < expected && (firstAfterCooldown ||
-      (operation.reason === 'waiting_for_instagram' && collected <= baseline))) {
-      const detail = waitingForList(progress);
-      if (operation.reason === 'waiting_for_instagram' && operation.message === detail) return operation;
-      return save({ ...operation, progress: firstAfterCooldown || last?.list !== list ? progress : last,
-        reason: 'waiting_for_instagram', message: detail });
+    if (state.reason === 'waiting_for_instagram' && last?.list === list && collected <= last.collected && collected < expected) {
+      return save({ ...state, progress, message: waitingForList(progress) });
     }
     const detail = `Checking ${listLabel(list)}… ${countDetail(progress)}`;
-    if (!operation.reason && operation.message === detail) return operation;
-    return save({ ...operation, progress, reason: undefined, message: detail });
+    return save({ ...state, progress, reason: undefined, message: detail });
   }
   if (message.type === 'F4F_FINISHED' && operation.status === 'running') {
+    if (operation.rateLimit && !operation.retryUsed) return reportRateLimit({ ...operation, status: 'error' });
     const validation = message.validation;
     if (validation?.verified !== true || validation.settled !== true || !['following', 'followers'].every(type =>
       Number.isSafeInteger(validation[type]?.expected) && validation[type].expected >= 0 &&
@@ -257,9 +335,6 @@ async function handle(message, sender) {
     }
   }
   if (message.type === 'F4F_FAILED') {
-    if (message.reason === 'rate_limited' && operation.retryAt > Date.now()) {
-      return fail(operation, `This check stopped because the cooldown exceeds the time left. ${cooldownMessage(operation, 'Retry after')}`, 'rate_limited');
-    }
     const detail = message.message || 'Checking failed.';
     const stalledAfterWait = operation.reason === 'waiting_for_instagram' && message.reason === 'incomplete_scan';
     return fail(operation, stalledAfterWait ? `Instagram’s list stalled after the cooldown. ${detail}` : detail, message.reason);
@@ -270,12 +345,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   serialized(() => handle(message, sender)).then(reply, error => reply({ error: error.message }));
   return true;
 });
-chrome.webRequest.onHeadersReceived.addListener(details => {
-  if (details.statusCode !== 429 || details.frameId !== 0 || details.tabId < 0 ||
-    !IG_ORIGIN.test(details.initiator || '')) return;
-  const now = Date.now();
-  serialized(() => pauseForRateLimit(details, now)).catch(console.error);
-}, { urls: IG_URLS, types: ['xmlhttprequest'] }, ['responseHeaders']);
+function observeListRequest(starting) {
+  return details => {
+    const category = requestCategory(details);
+    if (!category) return;
+    const now = Date.now();
+    serialized(() => trackListRequest(details, category, now, starting)).catch(console.error);
+  };
+}
+chrome.webRequest.onBeforeRequest.addListener(observeListRequest(true), LIST_TRAFFIC);
+chrome.webRequest.onHeadersReceived.addListener(observeListRequest(false), LIST_TRAFFIC, ['responseHeaders']);
+chrome.webRequest.onErrorOccurred.addListener(observeListRequest(false), LIST_TRAFFIC);
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.status !== 'complete') return;
   serialized(async () => {

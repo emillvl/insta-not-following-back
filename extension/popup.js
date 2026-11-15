@@ -25,7 +25,14 @@ function render(next) {
   const remaining = next.retryAt - Date.now();
   let { reason, message } = next;
   if (remaining > 0) {
-    cooldownTimer = setTimeout(() => render(operation), Math.min(remaining, 2 ** 31 - 1));
+    cooldownTimer = setTimeout(() => {
+      render(operation);
+      if (Date.now() >= next.retryAt) {
+        void chrome.runtime.sendMessage({ type: 'F4F_STATUS' }).then(state => {
+          if (operation === next && state?.status) render(state);
+        }).catch(() => {});
+      }
+    }, Math.min(remaining, 2 ** 31 - 1));
   } else if (remaining <= 0 && reason === 'rate_limited') {
     reason = status === 'running' ? 'waiting_for_instagram' : undefined;
     message = reason ? 'The cooldown ended. Waiting for Instagram to load the list.' :

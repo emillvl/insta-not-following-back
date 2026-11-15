@@ -43,18 +43,18 @@ refresh any open Instagram tabs before starting.
   own Profile from Instagram's menu so it can find the two list controls.
 - **Incomplete scan.** The message shows how many accounts the checker found
   and your profile total. Give Instagram time to load the list before retrying.
-- **Instagram rate limit.** The notice shows when an Instagram request returned
-  HTTP 429, the next attempt time, and who set the wait. Keep the tab open while
-  the checker waits. An active check then shows **Waiting for Instagram** while
-  the list loads. A check that stopped can be retried after the cooldown ends.
+- **Instagram rate limit.** The notice shows when Instagram returned HTTP 429
+  and any retry time it supplied. If the checker stops, use **Retry Checking**
+  when you are ready to try again. The button becomes available when any
+  Instagram-supplied wait ends.
 
 ## Checking
 
 The checker uses Instagram's native controls and the original script's pacing:
 three seconds after opening a list, two seconds before collection, 1.5 seconds
 per scroll pass, and two seconds after closing. It waits another two seconds
-between lists and requires eight stable passes before finishing. New rows never
-shorten these waits.
+between lists. A complete list needs seven stable passes at the end. A list
+that comes up short gets a longer wait.
 
 The checker reads profile links in the account list, including full Instagram
 URLs and links that label themselves with the account name. It follows the
@@ -64,17 +64,20 @@ Deactivated accounts remain included when their profile links are present.
 
 The checker takes overlapping steps through the loaded rows. If a list settles
 short of its total, it can rewind once to retrigger pagination. An unfinished
-list with a visible loader gets more time. Each list has a 20-minute limit.
+list with a visible loader gets more time. The collection phase for both lists
+has a single 20-minute limit.
 
 The scan stays in its Instagram tab. If a list still comes up short, the
 checker uses relationship labels from the lists first. Any additional exact
 searches run out of view, skip accounts marked deactivated, and stop once the
-total is verified. Results require both verified totals.
+total is verified. A check sends at most four exact search inputs. Results
+require both verified totals.
 
-If Instagram returns HTTP 429 in the scanning tab, the checker pauses list
-loading until the `Retry-After` time and keeps the accounts it has collected.
-Without a usable `Retry-After` value, successive cooldowns start at one minute
-and increase up to four minutes.
+The first HTTP 429 on a recognized list request stops the check if Instagram
+supplies no usable future `Retry-After`. When Instagram supplies a retry
+time, the checker pauses list activity until that time and allows one automatic
+retry across the whole check if the wait fits. Another HTTP 429 after that
+retry stops the check.
 
 A replaced dialog can reconnect within three seconds of a paced check. Four
 consecutive replacements without new accounts are allowed.
@@ -136,8 +139,9 @@ npm run build:icons
 
 Set `F4F_PLAYWRIGHT_PATH` if Playwright is installed elsewhere. Set
 `F4F_BROWSER_CHANNEL=chrome` to run the browser tests in Google Chrome.
-The `test:extension` suite also needs OpenSSL, which defaults to Git for
-Windows' OpenSSL on Windows. Set `F4F_OPENSSL_PATH` to use another copy.
+The `test:extension` suite also needs OpenSSL. On Windows it uses the
+`mingw64/bin/openssl.exe` included with Git for Windows. Set
+`F4F_OPENSSL_PATH` to use another copy.
 Tests use local fixtures and temporary browser profiles. Screenshots are saved
 in the ignored `artifacts` folder.
 
