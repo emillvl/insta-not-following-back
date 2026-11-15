@@ -33,7 +33,7 @@ async function run(options, baseline = false, real = false) {
     followingEndVisits: __followingEndVisits, comparisonCreated: __comparisonCreated,
     dialogsRemaining: document.querySelectorAll('div[role="dialog"]').length,
     listElapsedMs: Date.now() - window.__listOpenedAt,
-    actions: __actions, waits: __waits }));
+    actions: __actions, waits: __waits, retryAt: __retryAt }));
   result.wallMs = Date.now() - started;
   await page.close();
   return result;
@@ -48,13 +48,20 @@ try {
     { name: 'an inner overflow wrapper with no scroll range uses the outer viewport', size: 300, nestedScroller: true },
     { name: 'post links, hidden links and suggestions do not count as list members', size: 24, outsideLinks: true },
     { name: '111 of 114 following rows need a fresh arrival at the end', size: 114, followingEnd: 'reenter' },
-    { name: 'pending following batch needs no fresh scroll', size: 114, followingEnd: 'pending' },
+    { name: 'each stalled batch can be rechecked after more rows arrive', size: 114, followingEnd: 'multiple' },
+    { name: 'pending 60-second following batch needs no fresh scroll', size: 114, followingEnd: 'pending', followingDelay: 60000 },
+    { name: 'unmounted area below the last captured row is crossed in overlapping steps', size: 114, followingEnd: 'spacer' },
+    { name: 'an offscreen loading indicator does not prevent reaching the end', size: 114, followingEnd: 'footerLoader' },
+    { name: 'a 60-second cooldown pauses pagination and preserves captured rows', size: 114, followingEnd: 'limited', cooldown: 60000 },
+    { name: 'rate-limited opening retries after the cooldown', size: 114, cooldownOnOpen: 60000 },
+    { name: 'rate-limited opening can recover an empty dialog', size: 114, cooldownOnOpen: 60000, emptyShell: true },
     { name: '1000 cumulative', size: 1000 }, { name: '2000 cumulative', size: 2000 },
     { name: '10000 cumulative', size: 10000, batch: 250 },
     { name: '1000 virtual rows', size: 1000, mode: 'virtual' },
     { name: '10000 virtual rows', size: 10000, mode: 'virtual' },
     { name: '2000 recycled anchors', size: 2000, mode: 'recycled' },
     { name: 'slow virtual renderer', size: 200, mode: 'virtual', renderDelay: 1200 },
+    { name: 'slow virtual rendering keeps overlap with the last captured row', size: 200, mode: 'virtual', renderDelay: 9000 },
     { name: '18-second delayed batches', size: 200, batch: 100, delay: 18000 },
     { name: 'container replacement', size: 1000, mode: 'replace-container' },
     { name: 'dialog replacement', size: 1000, replaceDialog: true },
@@ -79,7 +86,17 @@ try {
     }
     if (options.followingEnd) {
       assert.deepEqual(result.done.validation.following, { expected: 114, collected: 114 });
-      assert.equal(result.followingEndVisits, options.followingEnd === 'pending' ? 1 : 2);
+      const visits = { reenter: 2, multiple: 6, pending: 1, spacer: 1, footerLoader: 1, limited: 2 };
+      assert.equal(result.followingEndVisits, visits[options.followingEnd]);
+    }
+    if (options.cooldown || options.cooldownOnOpen) {
+      const pauseStarted = result.retryAt - (options.cooldown || options.cooldownOnOpen);
+      const retries = result.actions.filter(action => action.list === 'following' && action.at > pauseStarted);
+      assert.ok(retries.length && retries.every(action => action.at >= result.retryAt), options.name);
+    }
+    if (options.followingEnd === 'spacer') {
+      const steps = result.actions.filter(action => action.list === 'following' && action.type === 'scroll');
+      assert.ok(steps.length > 2, 'cross the unmounted area without jumping to the bottom');
     }
     assert.equal(result.done.validation.verified, true);
     assert.equal(result.done.validation.settled, true);
@@ -103,6 +120,7 @@ try {
   for (const options of timingOnly ? [] : [
     { name: 'stalled list', size: 1000, mode: 'stall', reason: 'incomplete_scan' },
     { name: '111 of 114 following rows remain incomplete after one recheck', size: 114, followingEnd: 'stall', reason: 'incomplete_scan' },
+    { name: 'cooldown beyond the list deadline reports the rate limit', size: 114, followingEnd: 'limited', cooldown: 3600000, reason: 'rate_limited' },
     { name: 'unverifiable rounded total', size: 1000, rounded: true, reason: 'unverified_count' },
     { name: 'profile changes during scan', size: 1000, changedCount: true, reason: 'incomplete_scan' },
     { name: 'list closes during loading', size: 1000, delay: 18000, closeDuringLoad: true, reason: 'interrupted' },
@@ -115,11 +133,15 @@ try {
     assert.equal(result.failed?.reason, options.reason, `${options.name}: ${JSON.stringify(result)}`);
     assert.equal(result.resultsPresent, false);
     assert.equal(result.comparisonCreated, false, `${options.name}: comparison was constructed before verification`);
-    if (options.followingEnd) {
+    if (options.followingEnd === 'stall') {
       assert.equal(result.failed.message, 'F4F Checker verified 111 of 114 accounts you follow. No comparison was made.');
       assert.equal(result.followingEndVisits, 2);
       assert.equal(result.scrolls, 3);
-      assert.ok(result.listElapsedMs <= 42000, 'the stalled following scan exceeded the prior wait budget');
+      assert.ok(result.listElapsedMs <= 114000, 'the stalled following scan exceeded the new wait budget');
+    }
+    if (options.cooldown) {
+      assert.equal(result.followingEndVisits, 1);
+      assert.match(result.failed.message, /Retry after/);
     }
     if (options.replaceDialog || options.closeDuringLoad) assert.ok(result.listElapsedMs <= 20000, `${options.name}: interruption was not bounded`);
     records.push({ name: options.name, status: options.reason, scrolls: result.scrolls, wallMs: result.wallMs });

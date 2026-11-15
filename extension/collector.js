@@ -4,7 +4,10 @@ globalThis.F4FCollector = (() => {
   const HIDDEN = '[hidden], [aria-hidden="true"]';
   const OPEN_MS = 3000, SETUP_MS = 2000, STEP_MS = 1500, CLOSE_MS = 2000;
   const STABLE_PASSES = 8;
-  const END_STALL_MS = 19000;
+  const SCROLL_STALL_MS = 3 * STEP_MS;
+  const SCROLL_GAP_MS = STABLE_PASSES * STEP_MS;
+  const RECHECK_MS = 45000;
+  const LOAD_STALL_MS = 90000;
   const MAX_DIALOG_RECOVERIES = 4;
   const DIALOG_RECOVERY_MS = 3000;
   const LIST_LIMIT_MS = 20 * 60 * 1000;
@@ -79,6 +82,17 @@ globalThis.F4FCollector = (() => {
     await new Promise(resolve => setTimeout(resolve, ms));
     check();
   }
+  async function waitForInstagram() {
+    let retryAt = F4FBridge.retryAt || 0;
+    for (let remaining = retryAt - Date.now(); remaining > 0; remaining = retryAt - Date.now()) {
+      if (retryAt >= current.deadline) {
+        throw failure(`Instagram’s cooldown exceeds the time left to check ${current.type} (${current.users.size} of ${current.expected} collected). Retry after ${new Date(retryAt).toLocaleString()}.`, 'rate_limited');
+      }
+      await wait(Math.min(STEP_MS, remaining));
+      retryAt = F4FBridge.retryAt || 0;
+    }
+    return retryAt;
+  }
   async function until(predicate, timeout, message) {
     const end = Date.now() + timeout;
     while (!predicate()) {
@@ -151,9 +165,17 @@ globalThis.F4FCollector = (() => {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-  function loading() {
-    return [...current.dialog.querySelectorAll('[role="progressbar"], [aria-busy="true"]')]
-      .some(node => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
+  function loading(area) {
+    const selector = '[role="progressbar"], [aria-busy="true"]';
+    const nodes = [...current.dialog.querySelectorAll(selector)];
+    if (current.dialog.matches(selector)) nodes.push(current.dialog);
+    return nodes.some(node => {
+      if (!node.getClientRects().length || getComputedStyle(node).visibility !== 'visible') return false;
+      if (!area?.contains(node) || node.matches('[aria-busy="true"]')) return true;
+      const viewportTop = area.getBoundingClientRect().top + area.clientTop;
+      const bounds = node.getBoundingClientRect();
+      return bounds.bottom > viewportTop && bounds.top < viewportTop + area.clientHeight;
+    });
   }
   function countError() {
     const list = current.type === 'following' ? 'accounts you follow' : 'followers';
@@ -163,13 +185,18 @@ globalThis.F4FCollector = (() => {
   function validateSize() {
     return current.users.size >= current.expected;
   }
-  function step() {
+  function step(blockedFor) {
     const area = current.area;
     const top = area.scrollTop;
     const height = area.clientHeight;
     const last = area.contains(current.lastRow) ? current.lastRow : null;
     const knownBottom = last ? last.getBoundingClientRect().bottom - area.getBoundingClientRect().top + top : top;
-    const target = Math.min(area.scrollHeight - height, Math.max(top, knownBottom - height * .2));
+    let next = knownBottom - height * .2;
+    if (next <= top + 1) {
+      if (blockedFor >= SCROLL_STALL_MS && knownBottom > top + 2) next = knownBottom - 1;
+      else if (blockedFor >= SCROLL_GAP_MS) next = top + height * .75;
+    }
+    const target = Math.min(area.scrollHeight - height, next);
     if (target <= top + 1) return false;
     area.scrollTop = Math.max(0, target);
     return true;
@@ -189,29 +216,52 @@ globalThis.F4FCollector = (() => {
     current = { type, expected: counts[type], users: new Set(), recoveries: 0, deadline: Date.now() + LIST_LIMIT_MS };
     progress(true);
     if (current.expected === 0) return;
-    const control = F4FListControls.find(document, username, type);
-    if (!control) throw failure(`Instagram’s ${type} control is unavailable. Reload your profile and retry.`, 'page_readiness');
-    control.click();
-    await until(() => {
-      const dialog = document.querySelector('div[role="dialog"]');
-      if (!dialog) return false;
-      observeDialog(dialog); return true;
-    }, 15000, `Instagram’s ${type} dialog did not open. Retry checking.`);
-    await wait(OPEN_MS);
+    await openDialog();
+  }
+  async function openDialog() {
+    const { type } = current;
+    let clickedAfter = -1, openingDeadline = 0;
+    while (true) {
+      check();
+      const retryAt = await waitForInstagram();
+      let dialog = document.querySelector('div[role="dialog"]');
+      if (!dialog && retryAt > clickedAfter) {
+        const control = F4FListControls.find(document, username, type);
+        if (!control) throw failure(`Instagram’s ${type} control is unavailable. Reload your profile and retry.`, 'page_readiness');
+        clickedAfter = retryAt;
+        openingDeadline = Date.now() + 15000;
+        control.click();
+        dialog = document.querySelector('div[role="dialog"]');
+      }
+      if (dialog) {
+        current.handledLimit = clickedAfter;
+        observeDialog(dialog);
+        await wait(OPEN_MS);
+        return;
+      }
+      if (Date.now() >= openingDeadline) throw failure(`Instagram’s ${type} dialog did not open. Retry checking.`, 'page_readiness');
+      await wait(100);
+    }
   }
   async function collect() {
     check();
     if (current.expected === 0) { reports[current.type] = { expected: 0, collected: 0 }; return []; }
     await wait(SETUP_MS);
     let previousHeight = 0, previousSize = 0, noNewUsers = 0, stableLoops = 0;
-    let stallDeadline = null, revisitedEnd = false;
+    let stalledAt = null, blockedAt = null, rechecked = false, resumedFromLimit = false;
     while (true) {
       check();
+      const retryAt = await waitForInstagram();
+      if (retryAt > current.handledLimit) {
+        current.handledLimit = retryAt;
+        resumedFromLimit = true; rechecked = false;
+        stalledAt = null; blockedAt = null; noNewUsers = 0; stableLoops = 0;
+      }
       if (!current.dialog.isConnected) { await ensureDialog(); stableLoops = 0; noNewUsers = 0; }
       if (!current.dialog.contains(current.area) || !current.area.contains(current.lastRow) ||
         current.area.scrollHeight <= current.area.clientHeight) {
         const area = scrollArea(current.dialog);
-        if (area !== current.area) { bindArea(area); stableLoops = 0; }
+        if (area !== current.area) { bindArea(area); stableLoops = 0; blockedAt = null; }
         if (area || !current.hasViewport) capture(area || current.dialog);
       }
       flush();
@@ -219,29 +269,47 @@ globalThis.F4FCollector = (() => {
       const height = area?.scrollHeight || 0;
       const bottom = area ? height - area.clientHeight : 0;
       const top = area?.scrollTop || 0;
-      const atEnd = top >= bottom - 2;
+      const atEnd = area ? top >= bottom - 2 : !current.hasViewport;
+      const pending = loading(area);
       if (current.users.size > previousSize) {
-        stallDeadline = null; current.recoveries = 0; noNewUsers = 0; stableLoops = 0;
+        stalledAt = null; rechecked = false; resumedFromLimit = false;
+        current.recoveries = 0; noNewUsers = 0; stableLoops = 0;
       }
       if (height !== previousHeight) stableLoops = 0;
-      let delay = STEP_MS;
-      if (stableLoops >= STABLE_PASSES && atEnd) {
-        const pending = loading();
-        if (!pending && validateSize()) break;
-        const now = Date.now();
-        stallDeadline ??= now + END_STALL_MS;
-        const remaining = stallDeadline - now;
-        if (remaining <= 0) throw countError();
-        if (area && !pending && !revisitedEnd && top > 2 && remaining >= 2 * STEP_MS) {
-          revisitedEnd = true;
-          area.scrollTop = Math.max(0, top - area.clientHeight);
-        } else delay = Math.min(delay, remaining);
-      } else if (!atEnd) step();
-      else if (top < bottom) area.scrollTop = bottom;
-      await wait(delay);
+      if (stableLoops >= STABLE_PASSES && atEnd && !pending && validateSize()) break;
+
+      const now = Date.now();
+      let moved = false;
+      if (area && top < bottom) {
+        if (!atEnd) moved = step(pending ? 0 : now - (blockedAt ?? now));
+        else if (!pending) { area.scrollTop = bottom; moved = true; }
+        blockedAt = moved ? null : blockedAt ?? now;
+      } else blockedAt = null;
+
+      if (!moved && stableLoops >= STABLE_PASSES) {
+        stalledAt ??= now;
+        const stalledFor = now - stalledAt;
+        if (stalledFor >= LOAD_STALL_MS) throw countError();
+        if (!pending && !rechecked && (resumedFromLimit || stalledFor >= RECHECK_MS)) {
+          if (atEnd && area && top > 2) {
+            rechecked = true; resumedFromLimit = false;
+            area.scrollTop = Math.max(0, top - area.clientHeight);
+          } else if ((!area || bottom <= 2) && !validateSize()) {
+            rechecked = true; resumedFromLimit = false;
+            await closeDialog();
+            await openDialog();
+            await wait(SETUP_MS);
+            noNewUsers = 0; stableLoops = 0; blockedAt = null;
+          }
+        }
+      }
+      await wait(STEP_MS);
       flush();
       if (current.users.size === previousSize) noNewUsers++;
-      else { noNewUsers = 0; stallDeadline = null; current.recoveries = 0; }
+      else {
+        noNewUsers = 0; stalledAt = null; rechecked = false; resumedFromLimit = false;
+        current.recoveries = 0;
+      }
       const afterHeight = current.area?.scrollHeight || 0;
       if (afterHeight === previousHeight && noNewUsers >= 3) stableLoops++;
       else stableLoops = 0;
@@ -261,6 +329,12 @@ globalThis.F4FCollector = (() => {
   }
   async function close() {
     if (!current) return;
+    await closeDialog();
+    const finished = current.type === 'followers';
+    current = null;
+    if (finished) validation();
+  }
+  async function closeDialog() {
     current.observer?.disconnect();
     const end = Date.now() + 2500;
     while (current.dialog) {
@@ -272,9 +346,7 @@ globalThis.F4FCollector = (() => {
       await until(() => !dialog.isConnected, end - Date.now(), 'Instagram’s list could not be closed. Close it and retry checking.');
     }
     if (current.dialog) await wait(CLOSE_MS);
-    const finished = current.type === 'followers';
-    current = null;
-    if (finished) validation();
+    current.dialog = null;
   }
   function validation() {
     check();

@@ -52,9 +52,12 @@ added, removed, and recycled rows, including old href values. Account links
 resolve to Instagram profile URLs. Plain links need an account-name label that
 matches the destination. The collector retains case and insertion order.
 
-A cached last row limits scrolling to captured coverage. The collector chooses a
-container that holds account rows and has a scroll range. It uses declared
-scrolling containers for small lists that already fit. It reads mutations within
+A cached last row guides scrolling through captured coverage. When the target
+stops advancing, the collector waits for rendering, moves to the edge of the
+captured rows, and uses overlapping viewport steps to cross any remaining gap.
+The collector chooses a container that holds account rows and has a scroll
+range. It uses declared scrolling containers for small lists that already fit.
+It reads mutations within
 the selected container and reacquires replaced ones. Missing dialogs get three
 seconds to return at a paced check and up to four consecutive observed
 replacements without new accounts.
@@ -64,12 +67,20 @@ Deactivated rows are retained above those totals.
 
 Exact counts accept localized integers and grouped thousands, including Arabic,
 Persian, and fullwidth digits. Rounded values require an exact title or accessible
-value. Profile totals are read again before comparison. If the end settles
-before the scan can be verified, the collector checks for progress at the usual
-cadence for up to 19 seconds. New account rows reset that deadline. If the count
-is short and no loader is visible, the collector can scroll back one viewport
-and return to the end once per list. Each list has a 20-minute deadline. Empty
-lists skip opening, and short lists can settle without scrolling.
+value. Profile totals are read again before comparison. When the list settles
+before the scan can be verified or loading stalls above the end, the collector
+checks for progress for up to 90 seconds. After 45 seconds without a loader it
+can return to the end, or reopen a short list that has no usable scroll range.
+New accounts reset the stall timer and allow another recheck on a later batch.
+
+The worker observes first-party HTTP 429 responses in the top frame of the
+scanning tab. It honors `Retry-After` as seconds or an HTTP date and uses one-,
+two- and four-minute waits when no usable header is present. During the wait,
+the collector keeps observing rows and pauses list opening and scrolling. It
+then lets the list settle and rechecks the stalled batch. Each list has a
+20-minute deadline. If the requested cooldown exceeds the available time, the
+scan ends with a retry time. Empty lists skip opening, and short lists can
+settle without scrolling.
 
 The adapter requires the original result box and the collector's verified,
 settled evidence. The worker checks that evidence before saving results.

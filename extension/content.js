@@ -4,6 +4,8 @@
   let running = false;
   let assisting = false;
   let claimed = false;
+  let retryAt = 0;
+  let showingCooldown = false;
   let username = null;
   let waitStarted = Date.now();
   let lastReason = '';
@@ -161,8 +163,13 @@
     get runId() { return runId; },
     get running() { return running; },
     get claimed() { return claimed; },
+    get retryAt() { return retryAt; },
     warning, decorate, output,
     async progress(list, collected, expected) {
+      if (showingCooldown && retryAt <= Date.now()) {
+        showingCooldown = false;
+        warning('running');
+      }
       await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => {});
     },
     async finish(box, validation) {
@@ -190,6 +197,7 @@
     } else if (message.type === 'F4F_ASSIST') {
       if (runId !== message.runId) {
         runId = message.runId; waitStarted = Date.now(); lastReason = ''; claimed = false;
+        retryAt = 0; showingCooldown = false;
         username = null; clickedProfileFrom = null;
         resultBox?.remove(); resultBox = null;
       }
@@ -200,6 +208,13 @@
       const ok = message.runId === runId && !claimed && !running && ready(username);
       if (ok) { claimed = true; running = true; warning('running'); }
       reply({ ok });
+    } else if (message.type === 'F4F_RATE_LIMIT' && message.runId === runId && running) {
+      if (message.retryAt > retryAt) {
+        retryAt = message.retryAt;
+        showingCooldown = true;
+        warning('running', message.message);
+      }
+      reply({ ok: true });
     } else if (message.type === 'F4F_ERROR' && message.runId === runId) {
       running = false; claimed = true;
       warning('error', message.message, message.reason); reply({ ok: true });

@@ -23,7 +23,8 @@ function render(next) {
   el('indicator').className = `indicator ${active ? 'running' : status}`;
   el('symbol').textContent = status === 'completed' ? '✓' : status === 'error' ? '!' : active ? '•••' : '↗';
   el('title').textContent = status === 'waiting' && next.reason === 'login_required' ?
-    'Login required' : status === 'error' && ['incomplete_scan', 'unverified_count'].includes(next.reason) ?
+    'Login required' : next.reason === 'rate_limited' ? 'Instagram rate limit' :
+    status === 'error' && ['incomplete_scan', 'unverified_count'].includes(next.reason) ?
     'Incomplete scan' : titles[status] || titles.idle;
   el('message').textContent = status === 'idle' ? 'See which accounts you follow don’t follow you back.' : next.message;
   el('reminder').textContent = active ? 'Please keep the Instagram tab open and active. Switching tabs may interrupt or delay checking.' :

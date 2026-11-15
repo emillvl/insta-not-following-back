@@ -11,7 +11,8 @@ function harness(initialTabs = [], initialOperation) {
   let nextId = 100;
   const tabs = new Map(initialTabs.map(tab => [tab.id, { status: 'complete', windowId: 1, ...tab }]));
   const calls = [];
-  let handler, updated, removed;
+  let handler, updated, removed, headersReceived;
+  let now = Date.now();
   let probe = { runId: initialOperation?.runId, running: true };
   const chrome = {
     runtime: { getURL: path => `chrome-extension://test/${path}`,
@@ -20,6 +21,7 @@ function harness(initialTabs = [], initialOperation) {
       get: async () => ({ operation }), set: async data => { operation = structuredClone(data.operation); }
     } },
     action: { setBadgeText: async args => calls.push(['badge', args.text]), setBadgeBackgroundColor: async () => {} },
+    webRequest: { onHeadersReceived: { addListener: fn => { headersReceived = fn; } } },
     windows: { update: async (id, args) => { calls.push(['focus', id, args]); } },
     scripting: { executeScript: async args => { calls.push(['inject', args]); } },
     tabs: {
@@ -43,17 +45,71 @@ function harness(initialTabs = [], initialOperation) {
       onRemoved: { addListener: fn => { removed = fn; } }
     }
   };
-  const context = vm.createContext({ chrome, crypto: webcrypto, console });
+  const context = vm.createContext({ chrome, crypto: webcrypto, console, Date: class extends Date {
+    static now() { return now; }
+  } });
   vm.runInContext(workerSource, context);
   const popup = { url: 'chrome-extension://test/popup.html' };
   const page = id => ({ tab: { id }, frameId: 0, url: 'https://www.instagram.com/me/' });
   const dispatch = (message, sender = popup) => new Promise(resolve => handler(message, sender, resolve));
   return { dispatch, page, tabs, calls, chrome, context,
+    get now() { return now; },
+    advance: ms => { now += ms; },
+    response: details => headersReceived({ tabId: 2, frameId: 0, statusCode: 429,
+      initiator: 'https://www.instagram.com', ...details }),
     get operation() { return operation; },
     set probe(value) { probe = value; },
     update: (id, change) => updated(id, change), remove: id => { tabs.delete(id); removed(id); },
     settle: async () => { await vm.runInContext('queue', context); } };
 }
+test('only first-party 429s in the running tab pause the scan, honoring both Retry-After formats', async () => {
+  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
+  h.response({ tabId: 99 });
+  h.response({ frameId: 1 });
+  h.response({ initiator: 'https://example.com' });
+  h.response({ statusCode: 200 });
+  await h.settle();
+  assert.equal(h.operation.retryAt, undefined);
+
+  h.response({ responseHeaders: [{ name: 'Retry-After', value: '60' }] });
+  await h.settle();
+  assert.equal(h.operation.retryAt, h.now + 60000);
+  assert.equal(h.operation.reason, 'rate_limited');
+  assert.ok(h.calls.some(([type, id, message]) => type === 'message' && id === 2 &&
+    message.type === 'F4F_RATE_LIMIT' && message.runId === 'scan' && message.retryAt === h.operation.retryAt));
+  const later = new Date(h.now + 120000).toUTCString();
+  h.response({ responseHeaders: [{ name: 'retry-after', value: later }] });
+  h.response({ responseHeaders: [{ name: 'retry-after', value: '5' }] });
+  await h.settle();
+  assert.equal(h.operation.retryAt, Date.parse(later));
+
+  const progress = { type: 'F4F_PROGRESS', runId: 'scan', list: 'following', collected: 111, expected: 114 };
+  await h.dispatch(progress, h.page(2));
+  assert.equal(h.operation.reason, 'rate_limited');
+  h.advance(120000);
+  await h.dispatch(progress, h.page(2));
+  assert.equal(h.operation.status, 'running');
+  assert.equal(h.operation.reason, undefined);
+  assert.match(h.operation.message, /111 of 114/);
+});
+test('429s without a wait time back off and a stopped scan cannot restart during its cooldown', async () => {
+  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
+  const delays = [60000, 120000, 240000, 240000];
+  for (const [index, delay] of delays.entries()) {
+    h.response({});
+    h.response({});
+    await h.settle();
+    assert.equal(h.operation.retryAt, h.now + delay);
+    if (index < delays.length - 1) h.advance(delay);
+  }
+  await h.dispatch({ type: 'F4F_FAILED', runId: 'scan', reason: 'rate_limited' }, h.page(2));
+  const gated = await h.dispatch({ type: 'F4F_START' });
+  assert.equal(gated.runId, 'scan');
+  assert.match(gated.message, /Retry after/);
+  h.advance(240000);
+  const restarted = await h.dispatch({ type: 'F4F_START' });
+  assert.notEqual(restarted.runId, 'scan');
+});
 test('start on another website reuses and foregrounds Instagram with no unrelated access', async () => {
   const h = harness([{ id: 1, url: 'https://youtube.com/', active: true },
     { id: 2, url: 'https://www.instagram.com/explore/' }]);

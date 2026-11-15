@@ -13,7 +13,7 @@ assert.notEqual(readFileSync('extension/safe-runner.js').indexOf(comparisonTail)
   'validated runner must retain the original comparison and output bytes');
 const manifest = JSON.parse(readFileSync('extension/manifest.json', 'utf8'));
 assert.equal(manifest.manifest_version, 3);
-assert.deepEqual(manifest.permissions, ['storage', 'scripting']);
+assert.deepEqual(manifest.permissions, ['storage', 'scripting', 'webRequest']);
 assert.deepEqual(manifest.host_permissions, ['https://www.instagram.com/*', 'https://instagram.com/*']);
 for (const size of [16, 32, 48, 128]) {
   const path = manifest.icons?.[size];

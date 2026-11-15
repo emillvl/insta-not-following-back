@@ -8,7 +8,10 @@ import assert from 'node:assert/strict';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.F4F_PLAYWRIGHT_PATH || 'playwright');
+const channel = process.env.F4F_BROWSER_CHANNEL || 'msedge';
 const extensionPath = resolve('extension');
+const retrySeconds = 8;
+const followingRequests = [];
 const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="sidebar"><a href="/me/"><span>Profile</span></a></div>
@@ -24,10 +27,24 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     const scroll=document.createElement('div');scroll.style.cssText='height:100px;overflow-y:auto';
     const names=link.dataset.kind==='following'?['mutual','missing']:['mutual','fan'];
     if(window.__includeDeactivated)names.push('deactivated_one','deactivated_two');
-    for(const name of names){const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;
+    const addRow=name=>{const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;
       if(link.dataset.kind==='following'&&name==='mutual')row.removeAttribute('role');
       if(link.dataset.kind==='following'&&name==='missing')row.href='https://www.instagram.com/missing/';
-      scroll.append(row);}
+      scroll.append(row);};
+    names.forEach(addRow);
+    if(window.__limitFollowing&&link.dataset.kind==='following'){
+      let atEnd=false,pending=false,loaded=false;
+      scroll.addEventListener('scroll',async()=>{
+        const wasAtEnd=atEnd;
+        atEnd=scroll.scrollTop+scroll.clientHeight>=scroll.scrollHeight-2;
+        if(!atEnd||wasAtEnd||pending||loaded)return;
+        pending=true;
+        try{
+          const response=await fetch('/f4f-fixture/following-page');
+          if(response.ok){loaded=true;addRow('later');}
+        }finally{pending=false;}
+      });
+    }
     dialog.append(close,scroll);
     if(link.dataset.kind==='followers'){
       const placeholder=document.createElement('div');placeholder.setAttribute('role','dialog');
@@ -43,19 +60,35 @@ const openssl = process.env.F4F_OPENSSL_PATH || (process.platform === 'win32' ?
 execFileSync(openssl, ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key,
   '-out', cert, '-days', '1', '-subj', '/CN=www.instagram.com'], { stdio: 'ignore' });
 const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }, (req, res) => {
+  if (req.url === '/f4f-fixture/following-page') {
+    followingRequests.push(Date.now());
+    if (followingRequests.length === 1) {
+      res.writeHead(429, { 'Retry-After': retrySeconds, 'Cache-Control': 'no-store' });
+    }
+    res.end(); return;
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html);
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const port = server.address().port;
+const extensionArgs = channel === 'chrome' ? ['--enable-unsafe-extension-debugging'] :
+  [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`];
 const context = await chromium.launchPersistentContext(profile, {
-  channel: process.env.F4F_BROWSER_CHANNEL || 'msedge', headless: true,
+  channel, headless: true,
   ignoreDefaultArgs: ['--disable-extensions'], ignoreHTTPSErrors: true,
-  args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`,
-    '--ignore-certificate-errors', '--no-proxy-server',
+  args: [...extensionArgs, '--disable-gpu', '--ignore-certificate-errors', '--no-proxy-server',
     `--host-resolver-rules=MAP www.instagram.com 127.0.0.1:${port}, MAP instagram.com 127.0.0.1:${port}, MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1`]
 });
 try {
-  await context.route(/^https?:\/\//, route => route.fulfill({ contentType: 'text/html', body: html }));
+  if (channel === 'chrome') {
+    const session = await context.browser().newBrowserCDPSession();
+    await session.send('Extensions.loadUnpacked', { path: extensionPath });
+    await session.detach();
+  }
+  await context.route(/^https?:\/\//, route => {
+    if (route.request().url() === 'https://www.instagram.com/f4f-fixture/following-page') return route.continue();
+    return route.fulfill({ contentType: 'text/html', body: html });
+  });
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 10000 });
   const extensionId = new URL(worker.url()).host;
   const accelerateTimers = tabId => worker.evaluate(id => chrome.scripting.executeScript({ target: { tabId: id }, func: () => {
@@ -208,5 +241,42 @@ try {
   assert.equal(await errorView.locator('#message').textContent(), operation.message);
   assert.equal(await errorView.locator('#view').isVisible(), false);
   console.log('PASS: real MV3 incomplete list → retryable Incomplete scan, no View Results and no false non-follower box.');
+
+  await createdPage.close();
+  await worker.evaluate(() => chrome.storage.session.clear());
+  const limitedPage = await context.newPage();
+  await limitedPage.goto('https://www.instagram.com/me/');
+  await limitedPage.evaluate(() => {
+    window.__limitFollowing = true;
+    document.querySelector('[data-kind="following"]').textContent = '3 following';
+  });
+  await errorView.reload();
+  await errorView.locator('#start').click();
+  const readOperation = () => worker.evaluate(async () => (await chrome.storage.session.get('operation')).operation);
+  const waitForOperation = async (predicate, timeout) => {
+    const end = Date.now() + timeout;
+    let state;
+    do {
+      state = await readOperation();
+      if (predicate(state)) return state;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() < end && state?.status !== 'error');
+    throw new Error(`Unexpected extension state: ${JSON.stringify(state)}`);
+  };
+  const paused = await waitForOperation(state => state?.reason === 'rate_limited', 15000);
+  assert.equal(paused.status, 'running');
+  assert.ok(paused.retryAt >= followingRequests[0] + retrySeconds * 1000);
+  assert.equal(followingRequests.length, 1);
+  const pauseView = await context.newPage();
+  await pauseView.goto(`chrome-extension://${extensionId}/popup.html`);
+  await pauseView.locator('#title').filter({ hasText: 'Instagram rate limit' }).waitFor({ timeout: 4000 });
+  await limitedPage.bringToFront();
+  const resumed = await waitForOperation(state => state?.status === 'completed', 90000);
+  assert.equal(followingRequests.length, 2);
+  assert.ok(followingRequests[1] >= paused.retryAt, 'retried before Retry-After');
+  assert.ok(followingRequests[1] < paused.retryAt + 30000, 'rescan fell back to the ordinary stall timeout');
+  assert.deepEqual(resumed.validation.following, { expected: 3, collected: 3 });
+  assert.deepEqual(resumed.results.accounts, [{ name: 'missing', href: '/missing' }, { name: 'later', href: '/later' }]);
+  console.log('PASS: real MV3 HTTP 429 and Retry-After → visible cooldown → same scan resumes with all three accounts.');
   console.log('Isolated browser profile retained in the temporary directory; no signed-in profile was used.');
 } finally { await context.close(); server.close(); }

@@ -45,6 +45,8 @@ refresh any open Instagram tabs before starting.
   and select **Retry Checking**. When the account count falls short, the message
   shows the verified count and your profile total. Results require both lists to
   finish.
+- **Instagram rate limit.** Keep the tab open while the checker waits. If a
+  cooldown exceeds the scan's time limit, the extension shows when you can retry.
 
 ## Checking
 
@@ -60,9 +62,16 @@ container that holds those rows as Instagram adds, removes, or reuses them.
 Completion requires settled lists with at least the displayed totals.
 Deactivated accounts remain included when their profile links are present.
 
-When the list settles before the scan can be verified, the checker gives it up
-to 19 seconds to make progress. If the count is short and no loader is visible,
-it can revisit the end once at the usual pace. Each list has a 20-minute limit.
+The checker takes overlapping steps if scrolling stalls below the loaded rows.
+It waits for visible loaders and gives a stalled list up to 90 seconds after it
+settles. After 45 seconds with no loader, it can recheck the stalled batch once.
+New accounts reset that allowance. Each list has a 20-minute limit.
+
+If Instagram returns HTTP 429 in the scanning tab, the checker pauses list
+loading until the `Retry-After` time and keeps the accounts it has collected.
+Without a usable `Retry-After` value, successive cooldowns start at one minute
+and increase up to four minutes.
+
 A replaced dialog can reconnect within three seconds of a paced check. Four
 consecutive replacements without new accounts are allowed.
 Missing exact counts, changed profile totals, failed loading, or interruptions
@@ -76,7 +85,8 @@ links. An empty result is a completed check with zero accounts.
 
 The extension has no server or analytics and does not read or store your login
 credentials. Instagram receives the normal page interactions used to load its
-lists. Permissions are limited to storage, script injection, and Instagram.
+lists. The extension uses storage, script injection, and read-only observation
+of Instagram's rate-limit responses in the scanning tab.
 
 Results use local session storage. They survive closing the popup and can be
 reopened after closing the result box or Instagram tab. Browser restart or
@@ -121,10 +131,9 @@ npm run build:icons
 ```
 
 Set `F4F_PLAYWRIGHT_PATH` if Playwright is installed elsewhere. Set
-`F4F_BROWSER_CHANNEL=chrome` to run `test:browser`, `test:collector`, or
-`test:timing` in Google Chrome. Run `test:extension` with its default Edge
-channel. It also needs OpenSSL, which defaults to Git for Windows' OpenSSL on
-Windows. Set `F4F_OPENSSL_PATH` to specify another location.
+`F4F_BROWSER_CHANNEL=chrome` to run the browser tests in Google Chrome.
+The `test:extension` suite also needs OpenSSL, which defaults to Git for
+Windows' OpenSSL on Windows. Set `F4F_OPENSSL_PATH` to use another copy.
 Tests use local fixtures and temporary browser profiles. Screenshots are saved
 in the ignored `artifacts` folder.
 

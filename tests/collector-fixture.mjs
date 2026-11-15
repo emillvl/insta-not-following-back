@@ -11,6 +11,7 @@ export function collectorFixture(options = {}) {
   const following=size===0?[]:[...(options.followingEnd||options.mixedLinks ? followers.slice(0,113) : mutual),'missing'];
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
   window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
+  window.__retryAt=0;window.__followingOpens=0;
   new MutationObserver(records=>{
     for(const record of records)for(const node of record.addedNodes){
       if(node.nodeType===1&&node.querySelector('#closeF4FBox'))window.__comparisonCreated=true;
@@ -27,6 +28,11 @@ export function collectorFixture(options = {}) {
     if(type==='followers'&&options.exactTitle)control.title=String(names.length);
     control.onclick=event=>{
       event.preventDefault();__clicks.push('open:'+type);__actions.push({type:'open',list:type,at:Date.now()});
+      const limitedOpening=type==='following'&&++__followingOpens===1&&options.cooldownOnOpen;
+      if(limitedOpening){
+        __retryAt=Date.now()+options.cooldownOnOpen;
+        if(!options.emptyShell) return;
+      }
       let dialog=document.createElement('div');dialog.setAttribute('role','dialog');
       let host=document.body;
       if(options.replaceWrapper){host=document.createElement('section');document.body.append(host);}
@@ -34,6 +40,7 @@ export function collectorFixture(options = {}) {
       const close=document.createElement('button');close.setAttribute('aria-label','Close');
       close.onclick=()=>{__clicks.push('close:'+type);__actions.push({type:'close',list:type,at:Date.now()});dialog.remove();
         if(type==='followers'&&options.changedCount)control.textContent=(names.length+1)+' followers';};
+      if(limitedOpening){dialog.append(close);host.append(dialog);return;}
       let list=document.createElement(options.semanticScroller&&type==='followers'?'section':'div');list.className='scroller';
       list.style.cssText='position:relative;height:'+(options.viewport??320)+'px;overflow-y:auto';
       if(options.hiddenScroller&&type==='followers')list.style.overflowY='hidden';
@@ -48,27 +55,37 @@ export function collectorFixture(options = {}) {
         return row;};
       const append=(node,values)=>{const target=inner&&node===list?inner:node;for(const name of values)target.append(makeRow(name));};
       if(type==='following'&&options.followingEnd){
-        const firstBatch=111;
-        append(list,names.slice(0,firstBatch));
+        let loaded=111;
+        append(list,names.slice(0,loaded));
+        const spacer=document.createElement('div');
+        if(options.followingEnd==='spacer'){spacer.style.height='740px';list.append(spacer);}
+        if(options.followingEnd==='footerLoader'){
+          spacer.setAttribute('role','progressbar');spacer.style.height='8px';list.append(spacer);
+        }
         const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
-        let atEnd=false, finished=false;
-        const finish=()=>{finished=true;append(list,names.slice(firstBatch));};
+        const addRows=(end=names.length)=>{append(list,names.slice(loaded,end));loaded=end;};
         Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
           const before=scrollProperty.get.call(this);
+          const wasAtEnd=before+this.clientHeight>=this.scrollHeight-2;
           scrollProperty.set.call(this,value);
           if(this.scrollTop===before)return;
           __scrolls++;__actions.push({type:'scroll',list:type,at:Date.now()});
           const reachedEnd=this.scrollTop+this.clientHeight>=this.scrollHeight-2;
-          if(!finished&&reachedEnd&&!atEnd){
+          if(loaded<names.length&&reachedEnd&&!wasAtEnd){
             __followingEndVisits++;
-            if(options.followingEnd==='reenter'&&__followingEndVisits===2)finish();
+            if(options.followingEnd==='reenter'&&__followingEndVisits===2)addRows();
+            if(options.followingEnd==='multiple'&&__followingEndVisits%2===0)addRows(loaded+1);
+            if(['spacer','footerLoader'].includes(options.followingEnd)){spacer.remove();addRows();}
+            if(options.followingEnd==='limited'){
+              if(__followingEndVisits===1) __retryAt=Date.now()+options.cooldown;
+              else if(Date.now()>=__retryAt) addRows();
+            }
             if(options.followingEnd==='pending'&&__followingEndVisits===1){
               const spinner=document.createElement('div');spinner.setAttribute('role','progressbar');
               spinner.style.height='8px';dialog.append(spinner);
-              setTimeout(()=>{spinner.remove();finish();},24000);
+              setTimeout(()=>{spinner.remove();addRows();},options.followingDelay??24000);
             }
           }
-          atEnd=reachedEnd;
         }});
       }
       else if(type==='following'||mode==='all'){
@@ -153,6 +170,7 @@ export function collectorFixture(options = {}) {
     };
   }
   window.F4FBridge={claimed:true,running:true,
+    get retryAt(){return __retryAt;},
     progress:(list,collected,expected)=>__progress.push({list,collected,expected}),
     finish:(box,validation)=>{window.__done={heading:box.querySelector('h3').textContent,
       summary:box.querySelector('div').textContent.trim(),accounts:[...box.querySelectorAll('li a')].map(a=>a.textContent),validation};F4FBridge.running=false;},
