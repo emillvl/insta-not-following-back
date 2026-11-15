@@ -30,6 +30,7 @@ async function run(options, baseline = false, real = false) {
     originalAccounts: [...document.querySelectorAll('#closeF4FBox + h3 + div + ul li a')].map(a => a.textContent),
     originalSummary: document.getElementById('closeF4FBox')?.parentElement.querySelector('div').textContent.trim(),
     resultsPresent: Boolean(document.getElementById('closeF4FBox')),
+    followingEndVisits: __followingEndVisits,
     dialogsRemaining: document.querySelectorAll('div[role="dialog"]').length,
     listElapsedMs: Date.now() - window.__listOpenedAt,
     actions: __actions, waits: __waits }));
@@ -41,6 +42,8 @@ try {
   const timingOnly = process.argv.includes('--timing-only');
   const regressionOnly = process.argv.includes('--dialog-regressions');
   for (const options of timingOnly ? [] : [
+    { name: '111 of 114 following rows need a fresh arrival at the end', size: 114, followingEnd: 'reenter' },
+    { name: 'pending following batch needs no fresh scroll', size: 114, followingEnd: 'pending' },
     { name: '1000 cumulative', size: 1000 }, { name: '2000 cumulative', size: 2000 },
     { name: '10000 cumulative', size: 10000, batch: 250 },
     { name: '1000 virtual rows', size: 1000, mode: 'virtual' },
@@ -65,6 +68,10 @@ try {
     assert.ok(result.done, `${options.name}: no completion`);
     assert.deepEqual(result.done.accounts, options.size === 0 ? [] : ['missing'], options.name);
     assert.deepEqual(result.done.validation.followers, { expected: options.size - (options.smallerTotal || 0), collected: options.size });
+    if (options.followingEnd) {
+      assert.deepEqual(result.done.validation.following, { expected: 114, collected: 114 });
+      assert.equal(result.followingEndVisits, options.followingEnd === 'pending' ? 1 : 2);
+    }
     assert.equal(result.done.validation.verified, true);
     assert.equal(result.done.validation.settled, true);
     assert.equal(result.dialogsRemaining, 0, `${options.name}: list left open`);
@@ -86,6 +93,7 @@ try {
   }
   for (const options of timingOnly ? [] : [
     { name: 'stalled list', size: 1000, mode: 'stall', reason: 'incomplete_scan' },
+    { name: '111 of 114 following rows remain incomplete after one recheck', size: 114, followingEnd: 'stall', reason: 'incomplete_scan' },
     { name: 'unverifiable rounded total', size: 1000, rounded: true, reason: 'unverified_count' },
     { name: 'profile changes during scan', size: 1000, changedCount: true, reason: 'incomplete_scan' },
     { name: 'list closes during loading', size: 1000, delay: 18000, closeDuringLoad: true, reason: 'interrupted' },
@@ -97,6 +105,12 @@ try {
     assert.equal(result.done, undefined, `${options.name}: published incomplete results`);
     assert.equal(result.failed?.reason, options.reason, `${options.name}: ${JSON.stringify(result)}`);
     assert.equal(result.resultsPresent, false);
+    if (options.followingEnd) {
+      assert.match(result.failed.message, /Incomplete following scan: collected 111 of 114/);
+      assert.equal(result.followingEndVisits, 2);
+      assert.equal(result.scrolls, 3);
+      assert.ok(result.listElapsedMs <= 42000, 'the stalled following scan exceeded the prior wait budget');
+    }
     if (options.replaceDialog || options.closeDuringLoad) assert.ok(result.listElapsedMs <= 20000, `${options.name}: interruption was not bounded`);
     records.push({ name: options.name, status: options.reason, scrolls: result.scrolls, wallMs: result.wallMs });
     console.log('PASS:', options.name, '→ no false results');

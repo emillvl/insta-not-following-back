@@ -8,9 +8,9 @@ export function collectorFixture(options = {}) {
   const followers=Array.from({length:size},(_,i)=>'account_'+String(i).padStart(5,'0'));
   const mutual=size>=200?[...followers.slice(0,97),followers[Math.floor(size/2)],followers[size-1]]:
     followers.slice(0,Math.min(99,size));
-  const following=size===0?[]:[...mutual,'missing'];
+  const following=size===0?[]:[...(options.followingEnd ? followers.slice(0,113) : mutual),'missing'];
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
-  window.__actions=[];window.__waits=[];
+  window.__actions=[];window.__waits=[];window.__followingEndVisits=0;
   const nativeTimeout=window.setTimeout;
   window.setTimeout=(fn,ms,...args)=>{__waits.push(ms);return nativeTimeout(fn,ms,...args)};
   window.alert=text=>__alerts.push(text);
@@ -34,7 +34,31 @@ export function collectorFixture(options = {}) {
       const makeRow=name=>{const row=document.createElement('a');row.setAttribute('role','link');
         row.href='/'+name+'/';row.textContent=name;row.style.cssText='display:block;height:20px';return row;};
       const append=(node,values)=>{for(const name of values)node.append(makeRow(name));};
-      if(type==='following'||mode==='all'){
+      if(type==='following'&&options.followingEnd){
+        const firstBatch=111;
+        append(list,names.slice(0,firstBatch));
+        const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+        let atEnd=false, finished=false;
+        const finish=()=>{finished=true;append(list,names.slice(firstBatch));};
+        Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){
+          const before=scrollProperty.get.call(this);
+          scrollProperty.set.call(this,value);
+          if(this.scrollTop===before)return;
+          __scrolls++;__actions.push({type:'scroll',list:type,at:Date.now()});
+          const reachedEnd=this.scrollTop+this.clientHeight>=this.scrollHeight-2;
+          if(!finished&&reachedEnd&&!atEnd){
+            __followingEndVisits++;
+            if(options.followingEnd==='reenter'&&__followingEndVisits===2)finish();
+            if(options.followingEnd==='pending'&&__followingEndVisits===1){
+              const spinner=document.createElement('div');spinner.setAttribute('role','progressbar');
+              spinner.style.height='8px';dialog.append(spinner);
+              setTimeout(()=>{spinner.remove();finish();},24000);
+            }
+          }
+          atEnd=reachedEnd;
+        }});
+      }
+      else if(type==='following'||mode==='all'){
         append(list,names);
         const scrollProperty=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
         Object.defineProperty(list,'scrollTop',{get(){return scrollProperty.get.call(this)},set(value){

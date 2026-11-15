@@ -60,10 +60,12 @@ Deactivated rows are retained above those totals.
 
 Exact counts accept localized integers and grouped thousands, including Arabic,
 Persian, and fullwidth digits. Rounded values require an exact title or accessible
-value. Profile totals are read again before publication. Incomplete settled
-lists get waits of 3, 6, and 10 seconds; new accounts reset the retry budget.
-Each list has a 20-minute deadline. Empty lists skip opening; short lists can
-settle without scrolling.
+value. Profile totals are read again before publication. If the end settles
+before the scan can be verified, the collector checks for progress at the usual
+cadence for up to 19 seconds. New account rows reset that deadline. If the count
+is short and no loader is visible, the collector can scroll back one viewport
+and return to the end once per list. Each list has a 20-minute deadline. Empty
+lists skip opening, and short lists can settle without scrolling.
 
 The adapter requires the original result box and the collector's verified,
 settled evidence. The worker checks that evidence before saving results.

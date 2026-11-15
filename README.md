@@ -57,9 +57,11 @@ them. Scrolling stays within captured rows so virtual lists aren't skipped.
 Completion requires settled lists with at least the displayed totals.
 Deactivated accounts remain included when the collected total is higher.
 
-Incomplete loading gets additional waits of 3, 6, and 10 seconds. Each list has
-a 20-minute limit. A replaced dialog can reconnect within three seconds of a
-paced check; four consecutive replacements without new accounts are allowed.
+When the list settles before the scan can be verified, the checker gives it up
+to 19 seconds to make progress. If the count is short and no loader is visible,
+it can revisit the end once at the usual pace. Each list has a 20-minute limit.
+A replaced dialog can reconnect within three seconds of a paced check. Four
+consecutive replacements without new accounts are allowed.
 Missing exact counts, changed profile totals, failed loading, or interruptions
 stop the scan. Rounded labels such as `10K` require an exact title or
 accessibility value.

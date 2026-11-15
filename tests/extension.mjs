@@ -55,16 +55,25 @@ try {
   await context.route(/^https?:\/\//, route => route.fulfill({ contentType: 'text/html', body: html }));
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 10000 });
   const extensionId = new URL(worker.url()).host;
+  const accelerateTimers = tabId => worker.evaluate(id => chrome.scripting.executeScript({ target: { tabId: id }, func: () => {
+    const native = globalThis.setTimeout;
+    let now = Date.now();
+    Date.now = () => now;
+    globalThis.setTimeout = (fn, ms = 0, ...args) => {
+      const due = now + ms;
+      return native(() => {
+        now = Math.max(now, due);
+        fn(...args);
+      }, 0);
+    };
+  } }), tabId);
   const workerErrors = [];
   worker.on('console', msg => { if (msg.type() === 'error') workerErrors.push(msg.text()); });
   const instagram = await context.newPage();
   await instagram.goto('https://www.instagram.com/me/');
   await instagram.evaluate(() => document.getElementById('sidebar').remove());
   const instagramTab = await worker.evaluate(async () => (await chrome.tabs.query({ url: 'https://www.instagram.com/*' }))[0]);
-  await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, func: () => {
-    const native = globalThis.setTimeout;
-    globalThis.setTimeout = (fn, ms, ...args) => native(fn, 0, ...args);
-  } }), instagramTab.id);
+  await accelerateTimers(instagramTab.id);
   const outside = await context.newPage();
   await outside.goto('https://youtube.com/');
   const popup = await context.newPage();
@@ -143,10 +152,7 @@ try {
   assert.equal(createdTab.url, 'https://www.instagram.com/me/', JSON.stringify(
     await worker.evaluate(() => chrome.storage.session.get('operation'))));
   assert.equal(createdTab.active, true);
-  await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, func: () => {
-    const native = globalThis.setTimeout;
-    globalThis.setTimeout = (fn, ms, ...args) => native(fn, 0, ...args);
-  } }), createdTab.id);
+  await accelerateTimers(createdTab.id);
   const newDeadline = Date.now() + 15000;
   while (Date.now() < newDeadline) {
     operation = await worker.evaluate(async () => (await chrome.storage.session.get('operation')).operation);

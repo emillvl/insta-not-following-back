@@ -3,7 +3,7 @@ globalThis.F4FCollector = (() => {
   const ROWS = 'a[role="link"][href^="/"]';
   const OPEN_MS = 3000, SETUP_MS = 2000, STEP_MS = 1500, CLOSE_MS = 2000;
   const STABLE_PASSES = 8;
-  const RETRY_WAITS = [3000, 6000, 10000];
+  const END_STALL_MS = 19000;
   const MAX_DIALOG_RECOVERIES = 4;
   const DIALOG_RECOVERY_MS = 3000;
   const LIST_LIMIT_MS = 20 * 60 * 1000;
@@ -150,7 +150,8 @@ globalThis.F4FCollector = (() => {
     check();
     if (current.expected === 0) { reports[current.type] = { expected: 0, collected: 0 }; return []; }
     await wait(SETUP_MS);
-    let retries = 0, previousHeight = 0, previousSize = 0, noNewUsers = 0, stableLoops = 0;
+    let previousHeight = 0, previousSize = 0, noNewUsers = 0, stableLoops = 0;
+    let stallDeadline = null, revisitedEnd = false;
     while (true) {
       check();
       if (!current.dialog.isConnected) { await ensureDialog(); stableLoops = 0; noNewUsers = 0; }
@@ -165,26 +166,32 @@ globalThis.F4FCollector = (() => {
       }
       flush();
       const area = current.area;
-      const atEnd = !area || area.scrollTop + area.clientHeight >= area.scrollHeight - 2;
       const height = area?.scrollHeight || 0;
+      const bottom = area ? height - area.clientHeight : 0;
+      const top = area?.scrollTop || 0;
+      const atEnd = top >= bottom - 2;
       if (current.users.size > previousSize) {
-        retries = 0; current.recoveries = 0; noNewUsers = 0; stableLoops = 0;
+        stallDeadline = null; current.recoveries = 0; noNewUsers = 0; stableLoops = 0;
       }
       if (height !== previousHeight) stableLoops = 0;
+      let delay = STEP_MS;
       if (stableLoops >= STABLE_PASSES && atEnd) {
-        if (validateSize() && !loading()) break;
-        if (retries >= RETRY_WAITS.length) throw countError();
-        await wait(RETRY_WAITS[retries++]);
-      } else {
-        if (area) {
-          if (atEnd) area.scrollTop = area.scrollHeight;
-          else step();
-        }
-        await wait(STEP_MS);
-      }
+        const pending = loading();
+        if (!pending && validateSize()) break;
+        const now = Date.now();
+        stallDeadline ??= now + END_STALL_MS;
+        const remaining = stallDeadline - now;
+        if (remaining <= 0) throw countError();
+        if (area && !pending && !revisitedEnd && top > 2 && remaining >= 2 * STEP_MS) {
+          revisitedEnd = true;
+          area.scrollTop = Math.max(0, top - area.clientHeight);
+        } else delay = Math.min(delay, remaining);
+      } else if (!atEnd) step();
+      else if (top < bottom) area.scrollTop = bottom;
+      await wait(delay);
       flush();
       if (current.users.size === previousSize) noNewUsers++;
-      else { noNewUsers = 0; retries = 0; current.recoveries = 0; }
+      else { noNewUsers = 0; stallDeadline = null; current.recoveries = 0; }
       const afterHeight = current.area?.scrollHeight || 0;
       if (afterHeight === previousHeight && noNewUsers >= 3) stableLoops++;
       else stableLoops = 0;
