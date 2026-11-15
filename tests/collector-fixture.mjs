@@ -8,9 +8,14 @@ export function collectorFixture(options = {}) {
   const followers=Array.from({length:size},(_,i)=>'account_'+String(i).padStart(5,'0'));
   const mutual=size>=200?[...followers.slice(0,97),followers[Math.floor(size/2)],followers[size-1]]:
     followers.slice(0,Math.min(99,size));
-  const following=size===0?[]:[...(options.followingEnd ? followers.slice(0,113) : mutual),'missing'];
+  const following=size===0?[]:[...(options.followingEnd||options.mixedLinks ? followers.slice(0,113) : mutual),'missing'];
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
-  window.__actions=[];window.__waits=[];window.__followingEndVisits=0;
+  window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
+  new MutationObserver(records=>{
+    for(const record of records)for(const node of record.addedNodes){
+      if(node.nodeType===1&&node.querySelector('#closeF4FBox'))window.__comparisonCreated=true;
+    }
+  }).observe(document.body,{childList:true,subtree:true});
   const nativeTimeout=window.setTimeout;
   window.setTimeout=(fn,ms,...args)=>{__waits.push(ms);return nativeTimeout(fn,ms,...args)};
   window.alert=text=>__alerts.push(text);
@@ -29,11 +34,19 @@ export function collectorFixture(options = {}) {
       const close=document.createElement('button');close.setAttribute('aria-label','Close');
       close.onclick=()=>{__clicks.push('close:'+type);__actions.push({type:'close',list:type,at:Date.now()});dialog.remove();
         if(type==='followers'&&options.changedCount)control.textContent=(names.length+1)+' followers';};
-      let list=document.createElement('div');list.className='scroller';
+      let list=document.createElement(options.semanticScroller&&type==='followers'?'section':'div');list.className='scroller';
       list.style.cssText='position:relative;height:'+(options.viewport??320)+'px;overflow-y:auto';
+      if(options.hiddenScroller&&type==='followers')list.style.overflowY='hidden';
+      const inner=options.nestedScroller&&type==='followers'?document.createElement('div'):null;
+      if(inner){inner.style.overflowY='auto';list.append(inner);}
       const makeRow=name=>{const row=document.createElement('a');row.setAttribute('role','link');
-        row.href='/'+name+'/';row.textContent=name;row.style.cssText='display:block;height:20px';return row;};
-      const append=(node,values)=>{for(const name of values)node.append(makeRow(name));};
+        row.href='/'+name+'/';row.textContent=name;row.style.cssText='display:block;height:20px';
+        if(options.mixedLinks&&type==='following'){
+          if(name===names.at(-2))row.href='https://www.instagram.com/'+name+'/?source=fixture';
+          if(name===names.at(-1))row.removeAttribute('role');
+        }
+        return row;};
+      const append=(node,values)=>{const target=inner&&node===list?inner:node;for(const name of values)target.append(makeRow(name));};
       if(type==='following'&&options.followingEnd){
         const firstBatch=111;
         append(list,names.slice(0,firstBatch));
@@ -118,6 +131,12 @@ export function collectorFixture(options = {}) {
         },options.replacementGap??0);
       }
       dialog.append(close,list);
+      if(options.outsideLinks&&type==='following'){
+        const post=makeRow('post'),hidden=makeRow('hidden_account');
+        post.href='/p/fixture_photo/';hidden.hidden=true;
+        list.append(post,hidden);
+        setTimeout(()=>dialog.append(makeRow('suggested_account')),5500);
+      }
       if(options.lateScrollArea&&type==='followers'){
         const shell=document.createElement('div');shell.style.cssText='height:140px;overflow-y:auto';
         list.replaceWith(shell);

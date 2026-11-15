@@ -30,7 +30,7 @@ async function run(options, baseline = false, real = false) {
     originalAccounts: [...document.querySelectorAll('#closeF4FBox + h3 + div + ul li a')].map(a => a.textContent),
     originalSummary: document.getElementById('closeF4FBox')?.parentElement.querySelector('div').textContent.trim(),
     resultsPresent: Boolean(document.getElementById('closeF4FBox')),
-    followingEndVisits: __followingEndVisits,
+    followingEndVisits: __followingEndVisits, comparisonCreated: __comparisonCreated,
     dialogsRemaining: document.querySelectorAll('div[role="dialog"]').length,
     listElapsedMs: Date.now() - window.__listOpenedAt,
     actions: __actions, waits: __waits }));
@@ -42,6 +42,11 @@ try {
   const timingOnly = process.argv.includes('--timing-only');
   const regressionOnly = process.argv.includes('--dialog-regressions');
   for (const options of timingOnly ? [] : [
+    { name: 'all 114 following rows including absolute and native profile links', size: 114, mixedLinks: true },
+    { name: 'a non-div scroll container with incremental account rows', size: 300, semanticScroller: true },
+    { name: 'a programmatically scrollable container with hidden overflow', size: 300, hiddenScroller: true },
+    { name: 'an inner overflow wrapper with no scroll range uses the outer viewport', size: 300, nestedScroller: true },
+    { name: 'post links, hidden links and suggestions do not count as list members', size: 24, outsideLinks: true },
     { name: '111 of 114 following rows need a fresh arrival at the end', size: 114, followingEnd: 'reenter' },
     { name: 'pending following batch needs no fresh scroll', size: 114, followingEnd: 'pending' },
     { name: '1000 cumulative', size: 1000 }, { name: '2000 cumulative', size: 2000 },
@@ -68,6 +73,10 @@ try {
     assert.ok(result.done, `${options.name}: no completion`);
     assert.deepEqual(result.done.accounts, options.size === 0 ? [] : ['missing'], options.name);
     assert.deepEqual(result.done.validation.followers, { expected: options.size - (options.smallerTotal || 0), collected: options.size });
+    if (options.mixedLinks || options.outsideLinks) {
+      const expected = options.mixedLinks ? 114 : 25;
+      assert.deepEqual(result.done.validation.following, { expected, collected: expected });
+    }
     if (options.followingEnd) {
       assert.deepEqual(result.done.validation.following, { expected: 114, collected: 114 });
       assert.equal(result.followingEndVisits, options.followingEnd === 'pending' ? 1 : 2);
@@ -105,8 +114,9 @@ try {
     assert.equal(result.done, undefined, `${options.name}: published incomplete results`);
     assert.equal(result.failed?.reason, options.reason, `${options.name}: ${JSON.stringify(result)}`);
     assert.equal(result.resultsPresent, false);
+    assert.equal(result.comparisonCreated, false, `${options.name}: comparison was constructed before verification`);
     if (options.followingEnd) {
-      assert.match(result.failed.message, /Incomplete following scan: collected 111 of 114/);
+      assert.equal(result.failed.message, 'F4F Checker verified 111 of 114 accounts you follow. No comparison was made.');
       assert.equal(result.followingEndVisits, 2);
       assert.equal(result.scrolls, 3);
       assert.ok(result.listElapsedMs <= 42000, 'the stalled following scan exceeded the prior wait budget');

@@ -26,7 +26,7 @@ async function fail(operation, message, reason = 'checker_error') {
   if (!ACTIVE.has(operation.status)) return operation;
   const error = await save({ ...operation, status: 'error', message, reason, results: undefined });
   if (operation.tabId) chrome.tabs.sendMessage(operation.tabId, {
-    type: 'F4F_ERROR', runId: operation.runId, message
+    type: 'F4F_ERROR', runId: operation.runId, message, reason
   }).catch(() => {});
   return error;
 }
@@ -150,9 +150,10 @@ async function handle(message, sender) {
     if (!['following', 'followers'].includes(message.list) ||
       !Number.isSafeInteger(message.collected) || message.collected < 0 ||
       !Number.isSafeInteger(message.expected) || message.expected < 0) return { ignored: true };
+    const list = message.list === 'following' ? 'accounts you follow' : 'followers';
     const progress = message.collected > message.expected ?
-      `Collecting ${message.list}: ${message.collected} accounts (profile shows ${message.expected})…` :
-      `Collecting ${message.list}: ${message.collected} of ${message.expected} accounts…`;
+      `Checking ${list}… ${message.collected} found. Your profile shows ${message.expected}.` :
+      `Checking ${list}… ${message.collected} of ${message.expected} found.`;
     return save({ ...operation, message: progress });
   }
   if (message.type === 'F4F_FINISHED' && operation.status === 'running') {
@@ -160,7 +161,7 @@ async function handle(message, sender) {
     if (validation?.verified !== true || validation.settled !== true || !['following', 'followers'].every(type =>
       Number.isSafeInteger(validation[type]?.expected) && validation[type].expected >= 0 &&
       Number.isSafeInteger(validation[type]?.collected) && validation[type].collected >= validation[type].expected)) {
-      return fail(operation, 'The scan could not be verified as complete. Retry checking; no non-followers were confirmed.', 'incomplete_scan');
+      return fail(operation, 'Both lists could not be verified. No comparison was made.', 'incomplete_scan');
     }
     const results = message.results;
     if (!results || typeof results.heading !== 'string' || typeof results.summary !== 'string' ||

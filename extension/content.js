@@ -14,7 +14,7 @@
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const ready = name => name && F4FSelectors.usernameFromHref(location.href) === name &&
     ['following', 'followers'].every(type => F4FListControls.find(document, name, type));
-  function warning(kind, message) {
+  function warning(kind, message, reason) {
     clearTimeout(bannerTimer);
     let host = document.getElementById('f4f-warning');
     if (!host) {
@@ -37,8 +37,9 @@
     indicator.textContent = kind === 'success' ? '✓' : kind === 'error' ? '!' : '';
     const copy = document.createElement('div');
     const title = document.createElement('strong');
-    title.textContent = kind === 'running' ? '⚠️ PLEASE DO NOT SWITCH TABS' :
-      kind === 'success' ? '✓ Checking Complete' : 'Checking stopped';
+    const incomplete = reason === 'incomplete_scan' || reason === 'unverified_count';
+    title.textContent = kind === 'running' ? 'Checking your Instagram lists' :
+      kind === 'success' ? '✓ Checking Complete' : incomplete ? 'Incomplete scan' : 'Checking stopped';
     const text = document.createElement('p');
     text.textContent = message || 'F4F Checker is currently running. Please keep this Instagram tab open and active until the checking process is complete. Switching tabs may interrupt or delay the operation.';
     copy.append(title, text);
@@ -170,14 +171,14 @@
       running = false;
       if (response.status !== 'completed') {
         if (validation && response.reason !== 'storage_error') { box.remove(); resultBox = null; }
-        warning('error', response.message || response.error || 'Results could not be saved. Please retry checking.');
+        warning('error', response.message || response.error || 'Results could not be saved. Please retry checking.', response.reason);
         return;
       }
       warning('success', 'Your results are ready. Open F4F Checker to view them again.');
     },
     async fail(error) {
       running = false;
-      warning('error', error.message);
+      warning('error', error.message, error.reason);
       await send({ type: 'F4F_FAILED', message: error.message, reason: error.reason }).catch(() => {});
     }
   };
@@ -201,7 +202,7 @@
       reply({ ok });
     } else if (message.type === 'F4F_ERROR' && message.runId === runId) {
       running = false; claimed = true;
-      warning('error', message.message); reply({ ok: true });
+      warning('error', message.message, message.reason); reply({ ok: true });
     } else if (message.type === 'F4F_SHOW_RESULTS') {
       showResults(message.results); reply({ ok: true });
     }

@@ -48,19 +48,23 @@ isolated content-script world.
 The collector uses the original 3,000 ms opening wait, 2,000 ms setup, 1,500 ms
 scroll cadence, 2,000 ms closing wait, and eight stable passes. Arriving data never
 shortens these waits. It captures mounted rows before scrolling and observes
-added, removed, and recycled rows, including old href values. Extraction,
-exclusions, case, and Set order remain unchanged.
+added, removed, and recycled rows, including old href values. Account links
+resolve to Instagram profile URLs. Plain links need an account-name label that
+matches the destination. The collector retains case and insertion order.
 
-A cached last row limits scrolling to captured coverage. Replaced scroll
-containers are reacquired. Missing dialogs get three seconds to return at a paced
-check and up to four consecutive observed replacements without new accounts.
+A cached last row limits scrolling to captured coverage. The collector chooses a
+container that holds account rows and has a scroll range. It uses declared
+scrolling containers for small lists that already fit. It reads mutations within
+the selected container and reacquires replaced ones. Missing dialogs get three
+seconds to return at a paced check and up to four consecutive observed
+replacements without new accounts.
 Completion requires reaching the end, settled height and membership, no visible
 loading indicator, and collected totals at least as large as displayed counts.
 Deactivated rows are retained above those totals.
 
 Exact counts accept localized integers and grouped thousands, including Arabic,
 Persian, and fullwidth digits. Rounded values require an exact title or accessible
-value. Profile totals are read again before publication. If the end settles
+value. Profile totals are read again before comparison. If the end settles
 before the scan can be verified, the collector checks for progress at the usual
 cadence for up to 19 seconds. New account rows reset that deadline. If the count
 is short and no loader is visible, the collector can scroll back one viewport

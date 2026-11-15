@@ -42,7 +42,9 @@ refresh any open Instagram tabs before starting.
 - **Getting ready.** If the extension is waiting for your profile, open your
   own Profile from Instagram's menu so it can find the two list controls.
 - **Incomplete scan.** Close any open Instagram list, refresh your profile,
-  and select **Retry Checking**. An incomplete scan produces no comparison.
+  and select **Retry Checking**. When the account count falls short, the message
+  shows the verified count and your profile total. Results require both lists to
+  finish.
 
 ## Checking
 
@@ -52,10 +54,11 @@ per scroll pass, and two seconds after closing. It waits another two seconds
 between lists and requires eight stable passes before finishing. New rows never
 shorten these waits.
 
-Rows are captured before scrolling and as Instagram adds, removes, or reuses
-them. Scrolling stays within captured rows so virtual lists aren't skipped.
+The checker reads profile links in the account list, including full Instagram
+URLs and links that label themselves with the account name. It follows the
+container that holds those rows as Instagram adds, removes, or reuses them.
 Completion requires settled lists with at least the displayed totals.
-Deactivated accounts remain included when the collected total is higher.
+Deactivated accounts remain included when their profile links are present.
 
 When the list settles before the scan can be verified, the checker gives it up
 to 19 seconds to make progress. If the count is short and no loader is visible,

@@ -10,14 +10,13 @@ globalThis.F4FSelectors = (() => {
   const reserved = new Set(['accounts', 'explore', 'reels', 'reel', 'p', 'direct',
     'stories', 'notifications', 'about', 'developer', 'legal', 'privacy', 'challenge']);
   const normalize = text => String(text || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
-  function usernameFromHref(href) {
+  function usernameFromHref(href, base = location.origin) {
     try {
-      const url = new URL(href, location.origin);
-      if (!['www.instagram.com', 'instagram.com'].includes(url.hostname)) return null;
-      const parts = url.pathname.split('/').filter(Boolean);
-      const name = parts[0];
-      return parts.length === 1 && /^[a-zA-Z0-9._]{1,30}$/.test(name) &&
-        !reserved.has(name.toLowerCase()) ? name : null;
+      const url = new URL(href, base);
+      if (url.protocol !== 'https:' || url.username || url.password ||
+        !['www.instagram.com', 'instagram.com'].includes(url.host)) return null;
+      const name = url.pathname.match(/^\/([a-zA-Z0-9._]{1,30})\/?$/)?.[1];
+      return name && !reserved.has(name.toLowerCase()) ? name : null;
     } catch { return null; }
   }
   function visible(element) {

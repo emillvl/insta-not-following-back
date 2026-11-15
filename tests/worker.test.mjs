@@ -190,7 +190,7 @@ test('actual collection progress changes the message without marking completion'
   assert.equal(h.operation.status, 'running');
   assert.match(h.operation.message, /250 of 10000/);
   await h.dispatch({ type: 'F4F_PROGRESS', runId: 'progress', list: 'followers', collected: 10001, expected: 10000 }, h.page(13));
-  assert.match(h.operation.message, /10001 accounts \(profile shows 10000\)/);
+  assert.equal(h.operation.message, 'Checking followers… 10001 found. Your profile shows 10000.');
   assert.equal(h.operation.status, 'running');
 });
 

@@ -24,7 +24,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     const scroll=document.createElement('div');scroll.style.cssText='height:100px;overflow-y:auto';
     const names=link.dataset.kind==='following'?['mutual','missing']:['mutual','fan'];
     if(window.__includeDeactivated)names.push('deactivated_one','deactivated_two');
-    for(const name of names){const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;scroll.append(row)}
+    for(const name of names){const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;
+      if(link.dataset.kind==='following'&&name==='mutual')row.removeAttribute('role');
+      if(link.dataset.kind==='following'&&name==='missing')row.href='https://www.instagram.com/missing/';
+      scroll.append(row);}
     dialog.append(close,scroll);
     if(link.dataset.kind==='followers'){
       const placeholder=document.createElement('div');placeholder.setAttribute('role','dialog');
@@ -196,11 +199,13 @@ try {
   }
   assert.equal(operation.status, 'error');
   assert.equal(operation.reason, 'incomplete_scan');
+  assert.equal(operation.message, 'F4F Checker verified 2 of 3 accounts you follow. No comparison was made.');
   assert.equal(operation.results, undefined);
   assert.equal(await createdPage.locator('[data-f4f-results]').count(), 0);
   const errorView = await context.newPage();
   await errorView.goto(`chrome-extension://${extensionId}/popup.html`);
   await errorView.locator('#title').filter({ hasText: 'Incomplete scan' }).waitFor();
+  assert.equal(await errorView.locator('#message').textContent(), operation.message);
   assert.equal(await errorView.locator('#view').isVisible(), false);
   console.log('PASS: real MV3 incomplete list → retryable Incomplete scan, no View Results and no false non-follower box.');
   console.log('Isolated browser profile retained in the temporary directory; no signed-in profile was used.');

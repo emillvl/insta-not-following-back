@@ -1,17 +1,19 @@
 
 globalThis.F4FCollector = (() => {
-  const ROWS = 'a[role="link"][href^="/"]';
+  const ROWS = 'a[href]';
+  const HIDDEN = '[hidden], [aria-hidden="true"]';
   const OPEN_MS = 3000, SETUP_MS = 2000, STEP_MS = 1500, CLOSE_MS = 2000;
   const STABLE_PASSES = 8;
   const END_STALL_MS = 19000;
   const MAX_DIALOG_RECOVERIES = 4;
   const DIALOG_RECOVERY_MS = 3000;
   const LIST_LIMIT_MS = 20 * 60 * 1000;
-  let username, active, counts, current, failureReason, lastProgress = 0;
+  let username, active, counts, current, lastFailure, lastProgress = 0;
   const reports = {};
   function failure(message, reason = 'incomplete_scan') {
-    failureReason = reason;
-    const error = new Error(message); error.reason = reason; return error;
+    lastFailure = new Error(message);
+    lastFailure.reason = reason;
+    return lastFailure;
   }
   function check() {
     if (!active?.() || F4FSelectors.usernameFromHref(location.href) !== username) {
@@ -26,30 +28,43 @@ globalThis.F4FCollector = (() => {
     lastProgress = Date.now();
     void F4FBridge.progress?.(current.type, current.users.size, current.expected);
   }
-  function addHref(href) {
-    if (!href || !href.startsWith('/') || href.length <= 1) return;
-    const name = href.split('/')[1].split('?')[0];
-    if (name && !name.includes('/') && name !== 'explore' && name !== 'reels') current.users.add(name);
+  function accountName(anchor, href = anchor.getAttribute('href')) {
+    if (!href || anchor.closest(HIDDEN)) return null;
+    const name = F4FSelectors.usernameFromHref(href, document.baseURI);
+    if (!name || name.toLowerCase() === username.toLowerCase()) return null;
+    if (anchor.getAttribute('role') === 'link') return name;
+    const labels = [anchor.textContent, anchor.getAttribute('aria-label')];
+    return labels.some(label => label?.trim().replace(/^@/, '').toLowerCase() === name.toLowerCase()) ? name : null;
   }
   function capture(node) {
-    if (node.nodeType !== 1) return;
+    if (node?.nodeType !== 1) return;
     const row = anchor => {
-      addHref(anchor.getAttribute('href'));
-      if (current.area?.contains(anchor) && (!current.lastRow?.isConnected ||
+      const name = accountName(anchor);
+      if (!name) return;
+      current.users.add(name);
+      if (current.area?.contains(anchor) && (!current.area.contains(current.lastRow) ||
         current.lastRow.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) current.lastRow = anchor;
     };
     if (node.matches(ROWS)) row(node);
     for (const anchor of node.querySelectorAll(ROWS)) row(anchor);
   }
   function mutations(records) {
+    const scope = current.area || (!current.hasViewport && current.dialog);
+    if (!scope) return;
     const before = current.users.size;
     for (const record of records) {
+      if (!scope.contains(record.target)) continue;
+      const element = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      const anchor = element?.closest(ROWS);
       if (record.type === 'attributes') {
-        if (record.target.matches('a[role="link"]')) {
-          if (record.attributeName === 'href') addHref(record.oldValue);
-          capture(record.target);
+        if (record.attributeName === 'href' && element.matches('a')) {
+          const oldName = accountName(element, record.oldValue);
+          if (oldName) current.users.add(oldName);
         }
-      } else if (record.type === 'childList') {
+        if (record.attributeName === 'hidden' || record.attributeName === 'aria-hidden') capture(element);
+      }
+      capture(anchor);
+      if (record.type === 'childList') {
         for (const node of record.addedNodes) capture(node);
         for (const node of record.removedNodes) capture(node);
       }
@@ -73,18 +88,54 @@ globalThis.F4FCollector = (() => {
     }
   }
   function scrollArea(dialog) {
-    const areas = [...dialog.querySelectorAll('div')].filter(node => node.clientHeight > 0 &&
-      (node.scrollHeight > node.clientHeight || /auto|scroll/.test(getComputedStyle(node).overflowY)) &&
-      node.querySelector(ROWS));
-    return areas.reduce((best, node) => !best || node.scrollHeight > best.scrollHeight ? node : best, null);
+    const inspected = new Map(), areas = new Map();
+    for (const anchor of dialog.querySelectorAll(ROWS)) {
+      const name = accountName(anchor);
+      if (!name) continue;
+      let viewport, clipped, declared;
+      for (let node = anchor.parentElement; node; node = node.parentElement) {
+        if (!inspected.has(node)) {
+          const height = node.clientHeight;
+          inspected.set(node, { overflow: height ? getComputedStyle(node).overflowY : '',
+            canMove: height > 0 && node.scrollHeight > height });
+        }
+        const { overflow, canMove } = inspected.get(node);
+        if (/^(auto|scroll|overlay)$/.test(overflow)) {
+          if (canMove) { viewport = node; break; }
+          declared ??= node;
+        }
+        if (overflow === 'hidden' && canMove) clipped ??= node;
+        if (node === dialog) break;
+      }
+      const area = viewport || clipped || declared;
+      if (area) {
+        if (!areas.has(area)) areas.set(area, new Set());
+        areas.get(area).add(name);
+      }
+    }
+    let best = null, most = 0;
+    for (const [node, accounts] of areas) {
+      if (accounts.size > most) { best = node; most = accounts.size; }
+    }
+    return best;
+  }
+  function bindArea(area) {
+    if (area && !current.hasViewport) {
+      current.users.clear();
+      current.hasViewport = true;
+    }
+    current.area = area;
+    current.lastRow = null;
   }
   function observeDialog(dialog) {
     const scan = current;
     scan.observer?.disconnect();
-    scan.dialog = dialog; scan.area = null; scan.lastRow = null;
+    scan.dialog = dialog;
+    bindArea(scrollArea(dialog));
+    if (scan.area) capture(scan.area);
     scan.observer = new MutationObserver(records => { if (current === scan) mutations(records); });
-    scan.observer.observe(dialog, { subtree: true, childList: true, attributes: true,
-      attributeOldValue: true, attributeFilter: ['href', 'role', 'aria-busy'] });
+    scan.observer.observe(dialog, { subtree: true, childList: true, characterData: true, attributes: true,
+      attributeOldValue: true, attributeFilter: ['href', 'role', 'aria-label', 'hidden', 'aria-hidden'] });
   }
   async function ensureDialog() {
     if (current.dialog.isConnected) return;
@@ -105,7 +156,9 @@ globalThis.F4FCollector = (() => {
       .some(node => node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
   }
   function countError() {
-    return failure(`Incomplete ${current.type} scan: collected ${current.users.size} of ${current.expected}. Instagram stopped loading accounts. Retry checking; no non-followers were confirmed.`);
+    const list = current.type === 'following' ? 'accounts you follow' : 'followers';
+    if (validateSize()) return failure(`Instagram’s ${current.type} list did not finish loading. No comparison was made.`);
+    return failure(`F4F Checker verified ${current.users.size} of ${current.expected} ${list}. No comparison was made.`);
   }
   function validateSize() {
     return current.users.size >= current.expected;
@@ -114,7 +167,7 @@ globalThis.F4FCollector = (() => {
     const area = current.area;
     const top = area.scrollTop;
     const height = area.clientHeight;
-    const last = current.lastRow?.isConnected ? current.lastRow : null;
+    const last = area.contains(current.lastRow) ? current.lastRow : null;
     const knownBottom = last ? last.getBoundingClientRect().bottom - area.getBoundingClientRect().top + top : top;
     const target = Math.min(area.scrollHeight - height, Math.max(top, knownBottom - height * .2));
     if (target <= top + 1) return false;
@@ -122,12 +175,12 @@ globalThis.F4FCollector = (() => {
     return true;
   }
   async function prepare(isActive) {
-    dispose(); failureReason = null; active = isActive; username = F4FSelectors.usernameFromHref(location.href);
+    dispose(); lastFailure = null; active = isActive; username = F4FSelectors.usernameFromHref(location.href);
     counts = {};
     for (const type of ['following', 'followers']) {
       counts[type] = F4FListControls.expectedCount(document, username, type);
       if (counts[type] === null) throw failure(
-        `Instagram did not expose an exact ${type} total. A rounded count cannot verify a complete scan. Reload your profile and retry.`, 'unverified_count');
+        `Instagram’s ${type} total could not be verified. An exact total is needed before comparing the lists.`, 'unverified_count');
     }
     if (document.querySelector('div[role="dialog"]')) throw failure('Close the open Instagram dialog and retry checking.', 'page_readiness');
   }
@@ -155,14 +208,11 @@ globalThis.F4FCollector = (() => {
     while (true) {
       check();
       if (!current.dialog.isConnected) { await ensureDialog(); stableLoops = 0; noNewUsers = 0; }
-      if (!current.dialog.contains(current.area) || !current.area.contains(current.lastRow)) {
+      if (!current.dialog.contains(current.area) || !current.area.contains(current.lastRow) ||
+        current.area.scrollHeight <= current.area.clientHeight) {
         const area = scrollArea(current.dialog);
-        if (area !== current.area) {
-          current.area = area;
-          current.lastRow = null;
-          stableLoops = 0;
-        }
-        capture(area || current.dialog);
+        if (area !== current.area) { bindArea(area); stableLoops = 0; }
+        if (area || !current.hasViewport) capture(area || current.dialog);
       }
       flush();
       const area = current.area;
@@ -222,7 +272,9 @@ globalThis.F4FCollector = (() => {
       await until(() => !dialog.isConnected, end - Date.now(), 'Instagram’s list could not be closed. Close it and retry checking.');
     }
     if (current.dialog) await wait(CLOSE_MS);
+    const finished = current.type === 'followers';
     current = null;
+    if (finished) validation();
   }
   function validation() {
     check();
@@ -239,5 +291,5 @@ globalThis.F4FCollector = (() => {
     current = null;
     for (const type of ['following', 'followers']) delete reports[type];
   }
-  return { prepare, open, collect, close, validation, dispose, get failureReason() { return failureReason; } };
+  return { prepare, open, collect, close, validation, dispose, get lastFailure() { return lastFailure; } };
 })();
