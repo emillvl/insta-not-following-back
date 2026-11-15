@@ -4,27 +4,45 @@
 
 By Emil Valiyev
 
-A Chrome extension that checks which Instagram accounts you follow don't follow
-you back. It opens your own profile, reads the following and follower lists, and
-shows the results on Instagram. No login credentials needed.
+A browser extension that checks which Instagram accounts you follow don't
+follow you back. It opens your own profile, reads the following and follower
+lists, and shows the results on Instagram. A signed-in Instagram session is
+required.
 
 The original browser-console script is on
 [DevConsole-Version](https://github.com/emillvl/insta-not-following-back/tree/DevConsole-Version).
 
 ## Install and use
 
-1. Open `chrome://extensions` and enable Developer mode.
-2. Choose **Load unpacked** and select the `extension` folder.
-3. Open F4F Checker and select **Start Checking**.
-4. Sign in on Instagram if needed. The extension opens your Profile and continues
-   automatically. Keep the Instagram tab open and active.
-5. Read the results on Instagram, or reopen the popup and select **View Results**.
+In Microsoft Edge, install F4F Checker from
+[Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/f4f-checker/nkkjgaclfdeidnccmjiemcjdmeooobfj).
+For Google Chrome, download or clone this repository.
 
-After an update, reload the extension and refresh Instagram before starting.
+1. Open `chrome://extensions` and enable **Developer mode**.
+2. Choose **Load unpacked** and select the repository's `extension` folder.
 
-Closing the popup does not stop a check. **Check Again** starts another scan.
-Appearance offers **System**, **Light**, and **Dark**. System follows your
-computer's preferred mode; the choice is saved across browser sessions.
+Open F4F Checker from the browser's **Extensions** menu and select
+**Start Checking**. The extension opens Instagram or reuses an open Instagram
+tab. Keep that tab open and active while the extension opens your profile and
+checks both lists.
+
+Read the results on Instagram or reopen the popup and select **View Results**.
+Closing the popup does not stop a check. **Check Again** starts another scan
+after a completed check. **Appearance** offers **System**, **Light**, and
+**Dark**. System follows your computer's preferred mode. The choice is saved
+across browser sessions.
+
+After updating an unpacked install, select **Reload** on the extension card and
+refresh any open Instagram tabs before starting.
+
+### Troubleshooting
+
+- **Login required.** Sign in directly on Instagram. If the popup still shows
+  **Login required** afterward, select **Continue After Login**.
+- **Getting ready.** If the extension is waiting for your profile, open your
+  own Profile from Instagram's menu so it can find the two list controls.
+- **Incomplete scan.** Close any open Instagram list, refresh your profile,
+  and select **Retry Checking**. An incomplete scan produces no comparison.
 
 ## Checking
 
@@ -43,8 +61,8 @@ Incomplete loading gets additional waits of 3, 6, and 10 seconds. Each list has
 a 20-minute limit. A replaced dialog can reconnect within three seconds of a
 paced check; four consecutive replacements without new accounts are allowed.
 Missing exact counts, changed profile totals, failed loading, or interruptions
-stop the scan without publishing an incomplete result. Rounded labels such as
-`10K` require an exact title or accessibility value.
+stop the scan. Rounded labels such as `10K` require an exact title or
+accessibility value.
 
 The results keep the original Turkish labels, account order, totals, and profile
 links. An empty result is a completed check with zero accounts.
@@ -86,20 +104,22 @@ The production runner uses the safer collector while keeping the original
 comparison and result construction. The reference runner contains the full
 original script.
 
-Browser checks and logo exports require Playwright and installed Edge:
+Browser checks and logo exports use Playwright and default to Microsoft Edge.
 
 ```sh
 npm run test:browser
 npm run test:extension
 npm run test:collector
 npm run test:collector -- --real-timing --timing-only
+npm run test:timing
 npm run build:icons
 ```
 
-Set `F4F_PLAYWRIGHT_PATH` if Playwright is installed elsewhere.
-`F4F_BROWSER_CHANNEL` selects another compatible browser channel.
-The unpacked-extension test also needs OpenSSL; `F4F_OPENSSL_PATH` can override
-its location. Windows defaults to Git for Windows' OpenSSL.
+Set `F4F_PLAYWRIGHT_PATH` if Playwright is installed elsewhere. Set
+`F4F_BROWSER_CHANNEL=chrome` to run `test:browser`, `test:collector`, or
+`test:timing` in Google Chrome. Run `test:extension` with its default Edge
+channel. It also needs OpenSSL, which defaults to Git for Windows' OpenSSL on
+Windows. Set `F4F_OPENSSL_PATH` to specify another location.
 Tests use local fixtures and temporary browser profiles. Screenshots are saved
 in the ignored `artifacts` folder.
 
@@ -108,8 +128,8 @@ See [Algorithm](docs/ALGORITHM.md), [Interface](docs/DESIGN.md), and
 
 Instagram can change its markup or hide accounts. Counts and settling cannot
 prove a snapshot of memberships that change during checking. Switching tabs can
-delay execution. Automated tests use Edge fixtures; they do not establish
-compatibility with every live Instagram layout or language.
+delay execution. Live Instagram layouts and languages can differ from the test
+fixtures.
 
 ## License
 
