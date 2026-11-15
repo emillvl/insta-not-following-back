@@ -16,18 +16,29 @@ const titles = { idle: 'Ready to check?', navigating: 'Opening Instagram', waiti
   running: 'Checking in progress…', completed: 'Checking Complete', error: 'Checking stopped' };
 let operation = { status: 'idle' };
 let busy = false;
+let cooldownTimer;
 function render(next) {
+  clearTimeout(cooldownTimer);
   operation = next;
   const status = next.status || 'idle';
   const active = ['navigating', 'waiting', 'running'].includes(status);
+  const remaining = next.retryAt - Date.now();
+  let { reason, message } = next;
+  if (remaining > 0) {
+    cooldownTimer = setTimeout(() => render(operation), Math.min(remaining, 2 ** 31 - 1));
+  } else if (remaining <= 0 && reason === 'rate_limited') {
+    reason = status === 'running' ? 'waiting_for_instagram' : undefined;
+    message = reason ? 'The cooldown ended. Waiting for Instagram to load the list.' :
+      'The Instagram cooldown ended. You can retry checking.';
+  }
   el('indicator').className = `indicator ${active ? 'running' : status}`;
   el('symbol').textContent = status === 'completed' ? '✓' : status === 'error' ? '!' : active ? '•••' : '↗';
-  el('title').textContent = status === 'waiting' && next.reason === 'login_required' ?
-    'Login required' : next.reason === 'rate_limited' ? 'Instagram rate limit' :
-    next.reason === 'waiting_for_instagram' ? 'Waiting for Instagram' :
-    status === 'error' && ['incomplete_scan', 'unverified_count'].includes(next.reason) ?
+  el('title').textContent = status === 'waiting' && reason === 'login_required' ?
+    'Login required' : reason === 'rate_limited' ? 'Instagram rate limit' :
+    reason === 'waiting_for_instagram' ? 'Waiting for Instagram' :
+    status === 'error' && ['incomplete_scan', 'unverified_count'].includes(reason) ?
     'Incomplete scan' : titles[status] || titles.idle;
-  el('message').textContent = status === 'idle' ? 'See which accounts you follow don’t follow you back.' : next.message;
+  el('message').textContent = status === 'idle' ? 'See which accounts you follow don’t follow you back.' : message;
   el('reminder').textContent = active ? 'Please keep the Instagram tab open and active. Switching tabs may interrupt or delay checking.' :
     status === 'completed' ? 'Your results are ready on Instagram.' :
     'Instagram will open in an active tab. Keep it active while checking.';
@@ -36,10 +47,12 @@ function render(next) {
   el('view').hidden = status !== 'completed';
   el('again').hidden = status !== 'completed';
   el('continue').hidden = !active;
-  el('continue').textContent = next.reason === 'login_required' ? 'Continue After Login' : 'Return to Instagram';
+  el('continue').textContent = reason === 'login_required' ? 'Continue After Login' : 'Return to Instagram';
   el('result-summary').hidden = status !== 'completed' || !next.results;
   el('result-summary').textContent = next.results ? `${next.results.heading}\n${next.results.summary}` : '';
-  document.querySelectorAll('button').forEach(button => { button.disabled = busy; });
+  document.querySelectorAll('button').forEach(button => {
+    button.disabled = busy || (remaining > 0 && ['start', 'again'].includes(button.id));
+  });
 }
 async function action(type, extra = {}) {
   if (busy) return;

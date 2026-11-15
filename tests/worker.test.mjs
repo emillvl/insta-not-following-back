@@ -58,7 +58,7 @@ function harness(initialTabs = [], initialOperation) {
     get now() { return now; },
     advance: ms => { now += ms; },
     response: details => headersReceived({ tabId: 2, frameId: 0, statusCode: 429,
-      initiator: 'https://www.instagram.com', ...details }),
+      initiator: 'https://www.instagram.com', url: 'https://www.instagram.com/api/v1/friendships/123/following/', ...details }),
     get operation() { return operation; },
     set probe(value) { probe = value; },
     update: (id, change) => updated(id, change), remove: id => { tabs.delete(id); removed(id); },
@@ -77,6 +77,9 @@ test('only first-party 429s in the running tab pause the scan, honoring both Ret
   await h.settle();
   assert.equal(h.operation.retryAt, h.now + 60000);
   assert.equal(h.operation.reason, 'rate_limited');
+  assert.deepEqual(h.operation.rateLimit, { receivedAt: h.now, list: 'following', advertised: true });
+  assert.match(h.operation.message, /HTTP 429 while loading Following/);
+  assert.match(h.operation.message, /Instagram supplied the retry time/);
   assert.ok(h.calls.some(([type, id, message]) => type === 'message' && id === 2 &&
     message.type === 'F4F_RATE_LIMIT' && message.runId === 'scan' && message.retryAt === h.operation.retryAt));
   const later = new Date(h.now + 120000).toUTCString();
@@ -114,6 +117,45 @@ test('429s without a wait time back off and a stopped scan cannot restart during
   h.advance(240000);
   const restarted = await h.dispatch({ type: 'F4F_START' });
   assert.notEqual(restarted.runId, 'scan');
+});
+test('a stopped scan clears an expired two-hour rate limit before another check', async () => {
+  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'first' });
+  h.response({ responseHeaders: [{ name: 'Retry-After', value: '7200' }] });
+  await h.settle();
+  await h.dispatch({ type: 'F4F_FAILED', runId: 'first', reason: 'rate_limited' }, h.page(2));
+  h.advance(3600000);
+  assert.equal((await h.dispatch({ type: 'F4F_STATUS' })).reason, 'rate_limited');
+  h.advance(3600000);
+  const expired = await h.dispatch({ type: 'F4F_STATUS' });
+  assert.equal(expired.status, 'error');
+  assert.equal(expired.reason, undefined);
+  assert.match(expired.message, /cooldown ended/);
+
+  const next = await h.dispatch({ type: 'F4F_START' });
+  assert.notEqual(next.runId, 'first');
+  assert.equal(next.retryAt, undefined);
+  await h.dispatch({ type: 'F4F_READY', runId: next.runId }, h.page(2));
+  h.response({ url: 'https://www.instagram.com/graphql/query' });
+  await h.settle();
+  assert.equal(h.operation.reason, 'rate_limited');
+  assert.equal(h.operation.retryAt, h.now + 60000);
+  assert.deepEqual(h.operation.rateLimit, { receivedAt: h.now, list: undefined, advertised: false });
+  assert.match(h.operation.message, /HTTP 429 in this tab/);
+  assert.match(h.operation.message, /The checker set the cooldown/);
+});
+test('status moves past a running cooldown even without new list progress', async () => {
+  const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
+  const progress = { type: 'F4F_PROGRESS', runId: 'scan', list: 'followers', collected: 0, expected: 114 };
+  await h.dispatch(progress, h.page(2));
+  h.response({});
+  await h.settle();
+  assert.equal((await h.dispatch({ type: 'F4F_COOLDOWN_STATUS', runId: 'scan' }, h.page(2))).reason, 'rate_limited');
+  h.advance(60000);
+  const expired = await h.dispatch({ type: 'F4F_STATUS' });
+  assert.equal(expired.reason, 'waiting_for_instagram');
+  assert.match(expired.message, /0 of 114/);
+  await h.dispatch({ ...progress, collected: 1 }, h.page(2));
+  assert.equal(h.operation.reason, undefined);
 });
 test('a cooldown expiring with 0 of 114 followers stays in waiting until rows arrive', async () => {
   const h = harness([{ id: 2, url: 'https://www.instagram.com/me/' }], { status: 'running', tabId: 2, runId: 'scan' });
@@ -252,7 +294,7 @@ test('list-route progress stays in the original scan tab', async () => {
   assert.equal((await h.dispatch(progress, { ...h.page(3), url })).ignored, true);
   const state = await h.dispatch(progress, { ...h.page(2), url });
   assert.equal(state.tabId, 2);
-  assert.deepEqual({ ...state.progress }, { list: 'following', collected: 108 });
+  assert.deepEqual({ ...state.progress }, { list: 'following', collected: 108, expected: 114 });
   assert.ok(h.calls.every(call => call[0] !== 'create'));
 });
 test('switching active tabs never restarts, completes or intentionally hides the checker', async () => {

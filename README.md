@@ -43,9 +43,10 @@ refresh any open Instagram tabs before starting.
   own Profile from Instagram's menu so it can find the two list controls.
 - **Incomplete scan.** The message shows how many accounts the checker found
   and your profile total. Give Instagram time to load the list before retrying.
-- **Instagram rate limit.** Keep the tab open while the checker waits. The banner
-  shows the earliest time for the next attempt. **Waiting for Instagram** can
-  continue after that time if the list still needs more accounts.
+- **Instagram rate limit.** The notice shows when an Instagram request returned
+  HTTP 429, the next attempt time, and who set the wait. Keep the tab open while
+  the checker waits. An active check then shows **Waiting for Instagram** while
+  the list loads. A check that stopped can be retried after the cooldown ends.
 
 ## Checking
 

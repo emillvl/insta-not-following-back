@@ -6,6 +6,7 @@
   let claimed = false;
   let retryAt = 0;
   let cooldownNotice = '';
+  let cooldownTimer;
   let username = null;
   let waitStarted = Date.now();
   let lastReason = '';
@@ -160,6 +161,26 @@
       await send({ type: 'F4F_FAILED', message: error.message }).catch(() => {});
     } finally { assisting = false; }
   }
+  function showCooldownStatus(state) {
+    if (!cooldownNotice || state?.runId !== runId || state.retryAt !== retryAt) return;
+    if (!running && state.status === 'error' && !state.reason) {
+      cooldownNotice = '';
+      warning('error', state.message);
+      return;
+    }
+    if (!running || state.status !== 'running' || (state.reason && state.reason !== 'waiting_for_instagram')) return;
+    const notice = state.reason ? state.message : '';
+    if (notice !== cooldownNotice) {
+      cooldownNotice = notice;
+      warning('running', notice, state.reason);
+    }
+  }
+  function scheduleCooldownEnd() {
+    clearTimeout(cooldownTimer);
+    const remaining = retryAt - Date.now();
+    if (remaining > 0) cooldownTimer = setTimeout(scheduleCooldownEnd, Math.min(remaining, 2 ** 31 - 1));
+    else void send({ type: 'F4F_COOLDOWN_STATUS' }).then(showCooldownStatus).catch(() => {});
+  }
   globalThis.F4FBridge = {
     get runId() { return runId; },
     get running() { return running; },
@@ -168,18 +189,14 @@
     warning, decorate, output,
     async progress(list, collected, expected) {
       const state = await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => null);
-      if (!running || !cooldownNotice || state?.status !== 'running' || state.runId !== runId || state.retryAt !== retryAt) return;
-      if (state.reason && state.reason !== 'waiting_for_instagram') return;
-      const notice = state.reason ? state.message : '';
-      if (notice !== cooldownNotice) {
-        cooldownNotice = notice;
-        warning('running', notice, state.reason);
-      }
+      showCooldownStatus(state);
     },
     async finish(box, validation) {
       decorate(box);
       const response = await send({ type: 'F4F_FINISHED', results: output(box), validation });
       running = false;
+      clearTimeout(cooldownTimer);
+      cooldownNotice = '';
       if (response.status !== 'completed') {
         if (validation && response.reason !== 'storage_error') { box.remove(); resultBox = null; }
         warning('error', response.message || response.error || 'Results could not be saved. Please retry checking.', response.reason);
@@ -202,6 +219,7 @@
       if (runId !== message.runId) {
         runId = message.runId; waitStarted = Date.now(); lastReason = ''; claimed = false;
         retryAt = 0; cooldownNotice = '';
+        clearTimeout(cooldownTimer);
         username = null; clickedProfileFrom = null;
         resultBox?.remove(); resultBox = null;
       }
@@ -218,11 +236,15 @@
         retryAt = message.retryAt;
         cooldownNotice = message.message;
         warning('running', cooldownNotice, 'rate_limited');
+        scheduleCooldownEnd();
       }
       reply({ ok: true });
     } else if (message.type === 'F4F_ERROR' && message.runId === runId) {
       running = false; claimed = true;
-      warning('error', message.message, message.reason); reply({ ok: true });
+      warning('error', message.message, message.reason);
+      if (message.reason === 'rate_limited' && cooldownNotice) scheduleCooldownEnd();
+      else { clearTimeout(cooldownTimer); cooldownNotice = ''; }
+      reply({ ok: true });
     } else if (message.type === 'F4F_SHOW_RESULTS') {
       showResults(message.results); reply({ ok: true });
     }

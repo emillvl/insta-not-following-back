@@ -16,7 +16,7 @@ You sign in directly on Instagram. The extension does not ask for your password,
 
 During a check, list entries are held in the page's memory. The extension keeps operation status, your username, account names and profile links in the result, counts, validation details, timestamps and tab identifiers in browser session storage. This lets progress and results remain available when you close and reopen the popup. Closing the popup does not erase them. Session storage is cleared when the browser session ends or the extension reloads; starting another check replaces the current operation. A result displayed in an Instagram page can remain there until the page is reloaded or closed.
 
-The current scan's rate-limit cooldown is kept in browser session storage so it survives closing the popup.
+The current scan's rate-limit cooldown is kept in browser session storage so it survives closing the popup. The checker keeps the time of the HTTP 429 that set the current cooldown and the list type when it can identify it.
 
 Your appearance preference is saved separately in local extension storage and remains between browser sessions. Uninstalling the extension removes its extension storage through the browser.
 

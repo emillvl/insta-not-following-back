@@ -11,6 +11,7 @@ const { chromium } = require(process.env.F4F_PLAYWRIGHT_PATH || 'playwright');
 const channel = process.env.F4F_BROWSER_CHANNEL || 'msedge';
 const extensionPath = resolve('extension');
 const retrySeconds = 8;
+const followingPath = '/api/v1/friendships/123/following/';
 const followingRequests = [];
 const listNavigations = [];
 const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
@@ -62,7 +63,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
         if(!atEnd||wasAtEnd||pending||loaded)return;
         pending=true;
         try{
-          const response=await fetch('/f4f-fixture/following-page');
+          const response=await fetch('${followingPath}');
           if(response.ok){loaded=true;addRow('later');}
         }finally{pending=false;}
       });
@@ -85,7 +86,7 @@ const openssl = process.env.F4F_OPENSSL_PATH || (process.platform === 'win32' ?
 execFileSync(openssl, ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key,
   '-out', cert, '-days', '1', '-subj', '/CN=www.instagram.com'], { stdio: 'ignore' });
 const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }, (req, res) => {
-  if (req.url === '/f4f-fixture/following-page') {
+  if (req.url === followingPath) {
     followingRequests.push(Date.now());
     if (followingRequests.length === 1) {
       res.writeHead(429, { 'Retry-After': retrySeconds, 'Cache-Control': 'no-store' });
@@ -117,7 +118,7 @@ try {
   }
   await context.route(/^https?:\/\//, route => {
     const url = new URL(route.request().url());
-    if (url.href === 'https://www.instagram.com/f4f-fixture/following-page') return route.continue();
+    if (url.origin === 'https://www.instagram.com' && url.pathname === followingPath) return route.continue();
     if (url.origin === 'https://www.instagram.com' && /^\/me\/(following|followers)\/$/.test(url.pathname)) return route.continue();
     return route.fulfill({ contentType: 'text/html', body: html });
   });
@@ -346,12 +347,17 @@ try {
   await ratePopup.locator('#start').click();
   const paused = await waitForOperation(state => state?.reason === 'rate_limited', 15000);
   assert.equal(paused.status, 'running');
+  assert.equal(paused.rateLimit.list, 'following');
+  assert.equal(paused.rateLimit.advertised, true);
+  assert.ok(paused.rateLimit.receivedAt >= followingRequests[0]);
   assert.ok(paused.retryAt >= followingRequests[0] + retrySeconds * 1000);
   assert.equal(followingRequests.length, 1);
   const pauseView = await context.newPage();
   await pauseView.goto(`chrome-extension://${extensionId}/popup.html`);
   await pauseView.locator('#title').filter({ hasText: 'Instagram rate limit' }).waitFor({ timeout: 4000 });
-  assert.match(await pauseView.locator('#message').textContent(), /Next attempt after/);
+  const notice = await pauseView.locator('#message').textContent();
+  assert.match(notice, /HTTP 429 while loading Following/);
+  assert.match(notice, /Next attempt after/);
   await limitedPage.bringToFront();
   const waitingForRows = await waitForOperation(state => state?.reason === 'waiting_for_instagram', 15000);
   assert.match(waitingForRows.message, /2 of 3/);

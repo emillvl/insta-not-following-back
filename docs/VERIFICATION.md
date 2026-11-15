@@ -27,9 +27,11 @@ were in separate elements. A separate fixture needed to leave the pagination
 trigger zone before the remaining six rows could load. The updated collector
 reads all 114 in both cases and captures usernames from rapidly recycled links.
 
-The local HTTP 429 fixture verifies the cooldown and resumption. Static checks
-detect stale generated runners. Signed-in Instagram checks use the manual
-procedure below.
+The local HTTP 429 fixture verifies the response time, list identification,
+cooldown, and resumption. Clock-based tests verify that a two-hour cooldown
+expires in the popup and that a subsequent 429 gets a new timestamp. Static
+checks detect stale generated runners. Signed-in Instagram checks use the
+manual procedure below.
 
 ## Earlier verification
 

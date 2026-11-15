@@ -93,9 +93,11 @@ checked again before comparison.
 The worker observes first-party HTTP 429 responses in the top frame of the
 scanning tab. It honors `Retry-After` as seconds or an HTTP date and uses one-,
 two- and four-minute waits when no usable header is present. During the wait,
-the collector keeps observing rows and pauses list opening, scrolling, and searches. The
-banner shows the next attempt time. Once it elapses, a short list stays in
-Waiting for Instagram until the collected count grows. An empty dialog that
+the collector keeps observing rows and pauses list opening, scrolling, and
+searches. The notice shows the HTTP 429 time and whether Instagram or the
+checker set the retry time. The popup and page notice update at expiry even
+without new rows. While a check is active, a short list shows Waiting for
+Instagram until more rows arrive. An empty dialog that
 still shows a loader can be reopened once after 45 more seconds of settled
 inactivity. Each list has a 20-minute deadline. If the requested cooldown
 exceeds the available time, the scan ends with a retry time. Empty lists skip

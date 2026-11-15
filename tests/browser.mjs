@@ -328,6 +328,18 @@ try {
     await visual.locator('#message').filter({ hasText: 'Retry after 18:10.' }).waitFor();
     assert.equal(await visual.evaluate(() => __closed), false);
     checks++;
+    await visual.clock.install();
+    await visual.clock.pauseAt(new Date(Date.now() + 1000));
+    await visual.evaluate(() => __render({ status: 'error', reason: 'rate_limited', retryAt: Date.now() + 7200000,
+      message: 'Instagram returned HTTP 429.' }));
+    await visual.clock.fastForward(3600000);
+    assert.equal(await visual.locator('#title').textContent(), 'Instagram rate limit');
+    assert.equal(await visual.locator('#start').isDisabled(), true);
+    await visual.clock.fastForward(3600000);
+    assert.equal(await visual.locator('#title').textContent(), 'Checking stopped');
+    assert.match(await visual.locator('#message').textContent(), /cooldown ended/);
+    assert.equal(await visual.locator('#start').isEnabled(), true);
+    checks++;
     assert.equal(await visual.locator('#appearance').inputValue(), 'system');
     await visual.evaluate(() => __render({ status: 'waiting', reason: 'login_required', message: 'Log in to Instagram.' }));
     await visual.locator('#continue').click();
