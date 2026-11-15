@@ -41,10 +41,9 @@ refresh any open Instagram tabs before starting.
   **Login required** afterward, select **Continue After Login**.
 - **Getting ready.** If the extension is waiting for your profile, open your
   own Profile from Instagram's menu so it can find the two list controls.
-- **Incomplete scan.** Close any open Instagram list, refresh your profile,
-  and select **Retry Checking**. When the account count falls short, the message
-  shows the verified count and your profile total. Results require both lists to
-  finish.
+- **Incomplete scan.** The message shows how many accounts the checker found
+  and your profile total. If the direct list page also comes up short, give
+  Instagram time to load the list before retrying.
 - **Instagram rate limit.** Keep the tab open while the checker waits. The banner
   shows the earliest time for the next attempt. **Waiting for Instagram** can
   continue after that time if the list still needs more accounts.
@@ -66,7 +65,13 @@ Deactivated accounts remain included when their profile links are present.
 The checker takes overlapping steps if scrolling stalls below the loaded rows.
 It waits for visible loaders and gives a stalled list up to 90 seconds after it
 settles. After 45 seconds with no loader, it can recheck the stalled batch once.
-New accounts reset that allowance. Each list has a 20-minute limit.
+The recheck returns to the top so Instagram can trigger pagination again. New
+accounts reset that allowance. Each list has a 20-minute limit.
+
+If the normal list stays short, the checker opens that profile’s `/following/`
+or `/followers/` address once in a temporary tab. It keeps the accounts already
+collected and adds accounts from the settled list page. It closes the temporary
+tab and verifies the combined count before comparing.
 
 If Instagram returns HTTP 429 in the scanning tab, the checker pauses list
 loading until the `Retry-After` time and keeps the accounts it has collected.

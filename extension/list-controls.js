@@ -22,7 +22,8 @@ globalThis.F4FListControls = (() => {
     if (!control) return null;
     const numbers = new Set();
     for (const node of [control, ...control.querySelectorAll('span, [title], [aria-label]')]) {
-      for (const value of [node.getAttribute('title'), node.getAttribute('aria-label'), node.textContent]) {
+      if (!F4FSelectors.visible(node)) continue;
+      for (const value of [node.getAttribute('title'), node.getAttribute('aria-label'), node.innerText ?? node.textContent]) {
         if (!value) continue;
         let text = normalize(value);
         for (const label of labels[type]) {
@@ -41,15 +42,13 @@ globalThis.F4FListControls = (() => {
       new RegExp(`^(?:${count}\\s*${label}|${label}\\s*${count})$`, 'u').test(normalized));
   }
   function sameListHref(href, username, type) {
-    try {
-      const url = new URL(href, location.origin);
-      return ['www.instagram.com', 'instagram.com'].includes(url.hostname) &&
-        url.protocol === 'https:' && url.pathname.replace(/\/+$/, '') === `/${username}/${type}`;
-    } catch { return false; }
+    const list = F4FSelectors.listFromHref(href);
+    return list?.username === username && list?.type === type;
   }
   function find(document, username, type) {
     const canonical = `/${username}/${type}/`;
-    const links = Array.from(document.querySelectorAll('a'));
+    const links = Array.from(document.querySelectorAll('a')).filter(link =>
+      !link.closest('article, [role="dialog"]') && F4FSelectors.visible(link));
     const original = links.find(link => link.getAttribute('href') === canonical);
     if (original) return original;
     const equivalent = links.find(link => sameListHref(link.getAttribute('href'), username, type));
@@ -57,8 +56,7 @@ globalThis.F4FListControls = (() => {
     const scope = document.querySelector('main, [role="main"]') || document;
     const candidates = new Set();
     for (const label of scope.querySelectorAll('a, button, [role="button"], [role="link"], span, li, div')) {
-      if (label.closest('article, nav, aside, [role="navigation"], [role="dialog"], [hidden], [aria-hidden="true"]') ||
-        !label.getClientRects().length || getComputedStyle(label).visibility === 'hidden') continue;
+      if (label.closest('article, nav, aside, [role="navigation"], [role="dialog"]') || !F4FSelectors.visible(label)) continue;
       if (![label.textContent, label.getAttribute('aria-label'), label.getAttribute('title')]
         .some(text => matchesLabel(text, type))) continue;
       const control = label.closest('a, button, [role="button"], [role="link"]') || label;
@@ -88,5 +86,5 @@ globalThis.F4FListControls = (() => {
     }
     return links;
   }
-  return { find, forOriginal, parseExactCount, expectedCount };
+  return { find, forOriginal, parseExactCount, expectedCount, matchesLabel };
 })();

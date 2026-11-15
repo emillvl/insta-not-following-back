@@ -19,6 +19,16 @@ globalThis.F4FSelectors = (() => {
       return name && !reserved.has(name.toLowerCase()) ? name : null;
     } catch { return null; }
   }
+  function listFromHref(href, base = location.origin) {
+    try {
+      const url = new URL(href, base);
+      const match = url.pathname.match(/^\/([^/]+)\/(following|followers)\/*$/);
+      if (!match) return null;
+      url.pathname = `/${match[1]}/`;
+      const username = usernameFromHref(url.href);
+      return username ? { username, type: match[2] } : null;
+    } catch { return null; }
+  }
   function visible(element) {
     return !element.closest('[hidden], [aria-hidden="true"]') && element.getClientRects().length > 0 &&
       (typeof getComputedStyle !== 'function' || getComputedStyle(element).visibility !== 'hidden');
@@ -80,6 +90,6 @@ globalThis.F4FSelectors = (() => {
     }
     return null;
   }
-  return { closeLabels, profileLabels, editProfileLabels, usernameFromHref,
+  return { closeLabels, profileLabels, editProfileLabels, usernameFromHref, listFromHref, visible,
     profileControl, ownProfile, currentOwnProfile, querySelector };
 })();

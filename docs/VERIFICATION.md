@@ -1,8 +1,25 @@
 # Verification
 
+## 15 November 2026
+
+Browser fixtures reproduce a shortfall of 108 out of 114 with the previous
+collector. Six plain links were missed when their usernames and display names
+were in separate elements. A separate fixture needed to leave the pagination
+trigger zone before the remaining six rows could load. The updated collector
+reads all 114 in both cases and captures usernames from rapidly recycled links.
+
+The unpacked extension is tested with a 108-row profile dialog and a direct
+list page that exposes the missing rows. The integration check verifies both
+list addresses, the exact comparison, cleanup of temporary tabs, and rejection
+of a redirect to another account. The local HTTP 429 fixture verifies cooldown
+and resumption. Static checks detect stale generated runners without editing
+them. Signed-in Instagram checks use the manual procedure below.
+
+## Earlier verification
+
 8 October 2026, version 1.0.7.
 
-## Current checks
+### Recorded checks
 
 | Check | Result |
 | --- | --- |

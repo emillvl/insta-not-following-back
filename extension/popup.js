@@ -50,7 +50,7 @@ async function action(type, extra = {}) {
     const response = await chrome.runtime.sendMessage({ type, ...extra });
     if (response.error) throw new Error(response.error);
     render(response);
-    if (['F4F_START', 'F4F_CONTINUE', 'F4F_VIEW_RESULTS'].includes(type)) window.close();
+    if (response.status !== 'error' && ['F4F_START', 'F4F_CONTINUE', 'F4F_VIEW_RESULTS'].includes(type)) window.close();
   } catch (error) {
     el('action-error').textContent = error.message;
     el('action-error').hidden = false;

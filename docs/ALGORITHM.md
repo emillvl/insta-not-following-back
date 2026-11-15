@@ -30,12 +30,14 @@ CRLF bytes; `.gitattributes` preserves the source and runners.
 
 The worker selects an Instagram tab, brings it to the foreground, and asks
 `content.js` to open the native Profile control. The own page's Edit profile
-control confirms ownership. Readiness waits up to sixty seconds through login
-and profile navigation. Paths alone do not establish ownership.
+control or recognized navigation link confirms ownership. Readiness waits up to
+sixty seconds through login and profile navigation. Paths and cached usernames
+alone do not establish ownership.
 
 `list-controls.js` accepts exact original links first, then equivalent
 absolute/slashless links and labelled native controls or nested count spans.
-Clicks use Instagram's existing handlers. Close labels support English, Turkish,
+It reads visible controls and ignores hidden duplicate counts. Clicks use
+Instagram's existing handlers. Close labels support English, Turkish,
 Spanish, French, German, Italian, Portuguese, Russian, Arabic, Japanese, and
 Korean. Supported labels have fixture coverage; live translations can change.
 
@@ -50,15 +52,16 @@ scroll cadence, 2,000 ms closing wait, and eight stable passes. Arriving data ne
 shortens these waits. It captures mounted rows before scrolling and observes
 added, removed, and recycled rows, including old href values. Account links
 resolve to Instagram profile URLs. Plain links need an account-name label that
-matches the destination. The collector retains case and insertion order.
+matches the destination, including an exact username in a nested element. The
+collector retains case and insertion order.
 
 A cached last row guides scrolling through captured coverage. When the target
 stops advancing, the collector waits for rendering, moves to the edge of the
 captured rows, and uses overlapping viewport steps to cross any remaining gap.
 The collector chooses a container that holds account rows and has a scroll
 range. It uses declared scrolling containers for small lists that already fit.
-It reads mutations within
-the selected container and reacquires replaced ones. Missing dialogs get three
+It reads mutations within the selected container and reacquires replaced ones.
+Hidden dialogs are treated as closed. Missing dialogs get three
 seconds to return at a paced check and up to four consecutive observed
 replacements without new accounts.
 Completion requires reaching the end, settled height and membership, no visible
@@ -70,8 +73,15 @@ Persian, and fullwidth digits. Rounded values require an exact title or accessib
 value. Profile totals are read again before comparison. When the list settles
 before the scan can be verified or loading stalls above the end, the collector
 checks for progress for up to 90 seconds. After 45 seconds without a loader it
-can return to the end, or reopen a short list that has no usable scroll range.
+can rewind and rescan from the top, or reopen a short list that has no usable scroll range.
 New accounts reset the stall timer and allow another recheck on a later batch.
+
+A short scan triggers one direct navigation to the current account’s list URL
+in a temporary tab. The worker accepts the intended same-account route or a
+redirect back to the verified profile. The collector reads the list dialog or
+the labelled list page, then returns the names from a settled scan. The original
+page adds names it had missed and checks the combined total. The worker closes
+the temporary tab and discards responses from other tabs or accounts.
 
 The worker observes first-party HTTP 429 responses in the top frame of the
 scanning tab. It honors `Retry-After` as seconds or an HTTP date and uses one-,

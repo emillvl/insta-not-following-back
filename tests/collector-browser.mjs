@@ -31,7 +31,7 @@ async function run(options, baseline = false, real = false) {
     originalSummary: document.getElementById('closeF4FBox')?.parentElement.querySelector('div').textContent.trim(),
     resultsPresent: Boolean(document.getElementById('closeF4FBox')),
     followingEndVisits: __followingEndVisits, comparisonCreated: __comparisonCreated,
-    dialogsRemaining: document.querySelectorAll('div[role="dialog"]').length,
+    dialogsRemaining: document.querySelectorAll('[role="dialog"]:not([hidden])').length,
     listElapsedMs: Date.now() - window.__listOpenedAt,
     actions: __actions, waits: __waits, retryAt: __retryAt }));
   result.wallMs = Date.now() - started;
@@ -43,11 +43,18 @@ try {
   const regressionOnly = process.argv.includes('--dialog-regressions');
   for (const options of timingOnly ? [] : [
     { name: 'all 114 following rows including absolute and native profile links', size: 114, mixedLinks: true },
+    { name: 'all 114 including six links with separate usernames and display names', size: 114, splitAccountLabels: true },
+    { name: 'same-profile following and followers URLs keep the scan active', size: 114, listRoute: true },
+    { name: 'hidden duplicate controls and counts cannot supply the totals', size: 114, hiddenControls: true },
+    { name: 'hidden closed dialogs are skipped when opening the next list', size: 114, hideDialog: true },
+    { name: 'a competing visible dialog cannot be mistaken for the requested list', size: 114, competingDialog: true },
     { name: 'a non-div scroll container with incremental account rows', size: 300, semanticScroller: true },
     { name: 'a programmatically scrollable container with hidden overflow', size: 300, hiddenScroller: true },
     { name: 'an inner overflow wrapper with no scroll range uses the outer viewport', size: 300, nestedScroller: true },
     { name: 'post links, hidden links and suggestions do not count as list members', size: 24, outsideLinks: true },
     { name: '111 of 114 following rows need a fresh arrival at the end', size: 114, followingEnd: 'reenter' },
+    { name: '108 of 114 need to leave the pagination preload zone before retrying', size: 114, followingEnd: 'deepReenter' },
+    { name: 'six accounts reusing one plain link in a frame are all captured', size: 114, followingEnd: 'rapidRecycle' },
     { name: 'each stalled batch can be rechecked after more rows arrive', size: 114, followingEnd: 'multiple' },
     { name: 'pending 60-second following batch needs no fresh scroll', size: 114, followingEnd: 'pending', followingDelay: 60000 },
     { name: 'unmounted area below the last captured row is crossed in overlapping steps', size: 114, followingEnd: 'spacer' },
@@ -82,13 +89,13 @@ try {
     assert.ok(result.done, `${options.name}: no completion`);
     assert.deepEqual(result.done.accounts, options.size === 0 ? [] : ['missing'], options.name);
     assert.deepEqual(result.done.validation.followers, { expected: options.size - (options.smallerTotal || 0), collected: options.size });
-    if (options.mixedLinks || options.outsideLinks) {
-      const expected = options.mixedLinks ? 114 : 25;
+    if (options.mixedLinks || options.splitAccountLabels || options.outsideLinks) {
+      const expected = options.mixedLinks || options.splitAccountLabels ? 114 : 25;
       assert.deepEqual(result.done.validation.following, { expected, collected: expected });
     }
     if (options.followingEnd) {
       assert.deepEqual(result.done.validation.following, { expected: 114, collected: 114 });
-      const visits = { reenter: 2, multiple: 6, pending: 1, spacer: 1, footerLoader: 1, limited: 2 };
+      const visits = { reenter: 2, deepReenter: 2, rapidRecycle: 1, multiple: 6, pending: 1, spacer: 1, footerLoader: 1, limited: 2 };
       assert.equal(result.followingEndVisits, visits[options.followingEnd]);
     }
     if (options.cooldown || options.cooldownOnOpen) {

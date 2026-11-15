@@ -189,6 +189,15 @@ try {
   });
   await manual.waitForFunction(() => __messages.some(m => m.type === 'F4F_READY'));
   await manual.close(); checks++;
+  const cachedProfile = await pageFor();
+  await install(cachedProfile);
+  await cachedProfile.evaluate(() => {
+    document.querySelector('#sidebar').remove();
+    return __dispatch({ type: 'F4F_ASSIST', runId: 'cached-profile', username: 'me' });
+  });
+  await cachedProfile.waitForFunction(() => __messages.some(m => m.reason === 'page_readiness'));
+  assert.equal(await cachedProfile.evaluate(() => __messages.some(m => m.type === 'F4F_READY')), false);
+  await cachedProfile.close(); checks++;
   for (const label of ['Edit profile', 'Profili düzenle']) {
     const own = await pageFor(native, 'Close', false, '/me');
     await own.evaluate(label => {
@@ -307,6 +316,18 @@ try {
     await visual.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'light');
     await visual.emulateMedia({ colorScheme: 'dark' });
     await visual.waitForFunction(() => document.documentElement.getAttribute('data-f4f-theme') === 'dark');
+    await visual.evaluate(() => {
+      const send = chrome.runtime.sendMessage;
+      window.__closed = false;
+      window.close = () => { __closed = true; };
+      chrome.runtime.sendMessage = message => message.type === 'F4F_START' ?
+        Promise.resolve({ status: 'error', reason: 'rate_limited', message: 'Retry after 18:10.' }) : send(message);
+      __render({ status: 'error', reason: 'rate_limited', message: 'Instagram is limiting requests.' });
+    });
+    await visual.locator('#start').click();
+    await visual.locator('#message').filter({ hasText: 'Retry after 18:10.' }).waitFor();
+    assert.equal(await visual.evaluate(() => __closed), false);
+    checks++;
     assert.equal(await visual.locator('#appearance').inputValue(), 'system');
     await visual.evaluate(() => __render({ status: 'waiting', reason: 'login_required', message: 'Log in to Instagram.' }));
     await visual.locator('#continue').click();

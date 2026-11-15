@@ -12,6 +12,7 @@ const channel = process.env.F4F_BROWSER_CHANNEL || 'msedge';
 const extensionPath = resolve('extension');
 const retrySeconds = 8;
 const followingRequests = [];
+const listPages = new Map();
 const profile = mkdtempSync(join(tmpdir(), 'f4f-extension-test-'));
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="sidebar"><a href="/me/"><span>Profile</span></a></div>
@@ -25,7 +26,8 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     event.preventDefault();const dialog=document.createElement('div');dialog.setAttribute('role','dialog');
     const close=document.createElement('button');close.setAttribute('aria-label','Fermer');close.onclick=()=>dialog.remove();
     const scroll=document.createElement('div');scroll.style.cssText='height:100px;overflow-y:auto';
-    const names=link.dataset.kind==='following'?['mutual','missing']:['mutual','fan'];
+    const names=window.__listAccounts?.[link.dataset.kind]?.slice()??
+      (link.dataset.kind==='following'?['mutual','missing']:['mutual','fan']);
     if(window.__includeDeactivated)names.push('deactivated_one','deactivated_two');
     const addRow=name=>{const row=document.createElement('a');row.style.cssText='display:block;height:70px';row.setAttribute('role','link');row.setAttribute('href','/'+name+'/');row.textContent=name;
       if(link.dataset.kind==='following'&&name==='mutual')row.removeAttribute('role');
@@ -67,6 +69,13 @@ const server = createServer({ key: readFileSync(key), cert: readFileSync(cert) }
     }
     res.end(); return;
   }
+  const list = req.url.match(/^\/me\/(following|followers)\/$/)?.[1];
+  if (list) {
+    if (listPages.has(list)) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(listPages.get(list));
+    } else res.writeHead(302, { Location: '/other_account/' }).end();
+    return;
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html);
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -86,7 +95,9 @@ try {
     await session.detach();
   }
   await context.route(/^https?:\/\//, route => {
-    if (route.request().url() === 'https://www.instagram.com/f4f-fixture/following-page') return route.continue();
+    const url = new URL(route.request().url());
+    if (url.href === 'https://www.instagram.com/f4f-fixture/following-page') return route.continue();
+    if (url.origin === 'https://www.instagram.com' && /^\/me\/(following|followers)\/$/.test(url.pathname)) return route.continue();
     return route.fulfill({ contentType: 'text/html', body: html });
   });
   const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 10000 });
@@ -96,6 +107,7 @@ try {
     let now = Date.now();
     Date.now = () => now;
     globalThis.setTimeout = (fn, ms = 0, ...args) => {
+      if (ms > 120000) return native(fn, ms, ...args);
       const due = now + ms;
       return native(() => {
         now = Math.max(now, due);
@@ -230,9 +242,11 @@ try {
     if (operation?.status === 'error') break;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  assert.equal(operation.status, 'error');
+  assert.equal(operation.status, 'error', JSON.stringify({ operation, tabs: await worker.evaluate(() => chrome.tabs.query({
+    url: 'https://www.instagram.com/*'
+  })) }));
   assert.equal(operation.reason, 'incomplete_scan');
-  assert.equal(operation.message, 'F4F Checker verified 2 of 3 accounts you follow. No comparison was made.');
+  assert.equal(operation.message, 'F4F Checker verified 2 of 3 accounts you follow after trying Instagram’s /following/ page. No comparison was made.');
   assert.equal(operation.results, undefined);
   assert.equal(await createdPage.locator('[data-f4f-results]').count(), 0);
   const errorView = await context.newPage();
@@ -242,15 +256,28 @@ try {
   assert.equal(await errorView.locator('#view').isVisible(), false);
   console.log('PASS: real MV3 incomplete list → retryable Incomplete scan, no View Results and no false non-follower box.');
 
-  await createdPage.close();
+  const followingNames = Array.from({ length: 114 }, (_, index) => `follow_${index + 1}`);
+  const accountRows = names => names.map(name => `<a role="link" href="/${name}/" style="display:block;height:90px">${name}</a>`).join('');
+  listPages.set('following', `<!doctype html><main><h1>Following</h1>${accountRows(followingNames.slice(98))}</main>
+    <aside>${accountRows(['unrelated_suggestion'])}</aside>`);
+  listPages.set('followers', `<!doctype html><section role="dialog"><div style="height:100px;overflow:auto">
+    ${accountRows(['follow_1', 'follow_114'])}</div></section>`);
+  await createdPage.evaluate(names => {
+    window.__listAccounts = { following: names.slice(0, 108), followers: ['follow_1'] };
+    document.querySelector('[data-kind="following"]').textContent = '114 following';
+  }, followingNames);
   await worker.evaluate(() => chrome.storage.session.clear());
-  const limitedPage = await context.newPage();
-  await limitedPage.goto('https://www.instagram.com/me/');
-  await limitedPage.evaluate(() => {
-    window.__limitFollowing = true;
-    document.querySelector('[data-kind="following"]').textContent = '3 following';
-  });
+  const openedListPages = [];
+  const accelerateListPage = async page => {
+    await page.waitForURL(url => /\/me\/(following|followers)\/$/.test(url.pathname), { timeout: 20000 });
+    openedListPages.push(new URL(page.url()).pathname);
+    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({ url }))[0].id, page.url());
+    await accelerateTimers(tabId);
+  };
+  const pageTasks = [];
+  const captureListPage = page => { pageTasks.push(accelerateListPage(page)); };
   await errorView.reload();
+  context.on('page', captureListPage);
   await errorView.locator('#start').click();
   const readOperation = () => worker.evaluate(async () => (await chrome.storage.session.get('operation')).operation);
   const waitForOperation = async (predicate, timeout) => {
@@ -263,6 +290,27 @@ try {
     } while (Date.now() < end && state?.status !== 'error');
     throw new Error(`Unexpected extension state: ${JSON.stringify(state)}`);
   };
+  const recovered = await waitForOperation(state => state?.status === 'completed', 30000);
+  context.off('page', captureListPage);
+  await Promise.all(pageTasks);
+  assert.deepEqual(openedListPages, ['/me/following/', '/me/followers/']);
+  assert.deepEqual(recovered.validation.following, { expected: 114, collected: 114 });
+  assert.deepEqual(recovered.validation.followers, { expected: 2, collected: 2 });
+  assert.deepEqual(recovered.results.accounts.map(account => account.name), followingNames.slice(1, -1));
+  assert.equal((await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.instagram.com/*' }))).length, 1);
+  console.log('PASS: both native list URLs are read when short, merging six missed accounts and closing the temporary tabs.');
+
+  await createdPage.close();
+  await worker.evaluate(() => chrome.storage.session.clear());
+  const limitedPage = await context.newPage();
+  await limitedPage.goto('https://www.instagram.com/me/');
+  await limitedPage.evaluate(() => {
+    window.__limitFollowing = true;
+    document.querySelector('[data-kind="following"]').textContent = '3 following';
+  });
+  const ratePopup = await context.newPage();
+  await ratePopup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await ratePopup.locator('#start').click();
   const paused = await waitForOperation(state => state?.reason === 'rate_limited', 15000);
   assert.equal(paused.status, 'running');
   assert.ok(paused.retryAt >= followingRequests[0] + retrySeconds * 1000);

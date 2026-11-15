@@ -12,9 +12,10 @@
   let clickedProfileFrom = null;
   let resultBox = null;
   let bannerTimer;
+  let routeReply;
   const send = message => chrome.runtime.sendMessage({ ...message, runId });
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const ready = name => name && F4FSelectors.usernameFromHref(location.href) === name &&
+  const ready = (name, owner) => name && name === owner && F4FSelectors.usernameFromHref(location.href) === name &&
     ['following', 'followers'].every(type => F4FListControls.find(document, name, type));
   function warning(kind, message, reason) {
     clearTimeout(bannerTimer);
@@ -134,7 +135,7 @@
           const profile = F4FSelectors.profileControl(document);
           const name = ownPage || profile?.username || username;
           if (name) username = name;
-          if (ready(name)) {
+          if (ready(name, ownPage || profile?.username)) {
             await send({ type: 'F4F_READY' });
             return;
           }
@@ -166,6 +167,34 @@
     get claimed() { return claimed; },
     get retryAt() { return retryAt; },
     warning, decorate, output,
+    async recoverList(list, expected, collected, deadline) {
+      let timeout;
+      const result = new Promise(resolve => {
+        routeReply = resolve;
+        timeout = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now()));
+      });
+      try {
+        const response = await send({ type: 'F4F_OPEN_LIST_PAGE', list, expected, collected, deadline });
+        return response?.ok ? await result : response;
+      } finally {
+        clearTimeout(timeout);
+        routeReply = null;
+      }
+    },
+    async readListPage(request) {
+      if (running) return;
+      runId = request.runId;
+      running = true;
+      retryAt = request.retryAt || 0;
+      cooldownNotice = retryAt > Date.now() ? request.message : '';
+      warning('running', cooldownNotice || `Reading Instagram’s /${request.list}/ page.`,
+        cooldownNotice ? 'rate_limited' : undefined);
+      let result;
+      try { result = { accounts: await F4FCollector.readListPage(request, () => running) }; }
+      catch (error) { result = { message: error.message, reason: error.reason }; }
+      finally { running = false; }
+      await send({ type: 'F4F_LIST_PAGE_DONE', ...result }).catch(() => {});
+    },
     async progress(list, collected, expected) {
       const state = await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => null);
       if (!running || !cooldownNotice || state?.status !== 'running' || state.runId !== runId || state.retryAt !== retryAt) return;
@@ -209,7 +238,8 @@
       reply({ ok: true });
       void assist();
     } else if (message.type === 'F4F_CLAIM') {
-      const ok = message.runId === runId && !claimed && !running && ready(username);
+      const ok = message.runId === runId && !claimed && !running &&
+        ready(username, F4FSelectors.currentOwnProfile(document) || F4FSelectors.ownProfile(document));
       if (ok) { claimed = true; running = true; warning('running'); }
       reply({ ok });
     } else if (message.type === 'F4F_RATE_LIMIT' && message.runId === runId && running) {
@@ -219,8 +249,11 @@
         warning('running', cooldownNotice, 'rate_limited');
       }
       reply({ ok: true });
+    } else if (message.type === 'F4F_LIST_PAGE_RESULT' && message.runId === runId) {
+      routeReply?.(message); reply({ ok: true });
     } else if (message.type === 'F4F_ERROR' && message.runId === runId) {
       running = false; claimed = true;
+      routeReply?.(message);
       warning('error', message.message, message.reason); reply({ ok: true });
     } else if (message.type === 'F4F_SHOW_RESULTS') {
       showResults(message.results); reply({ ok: true });

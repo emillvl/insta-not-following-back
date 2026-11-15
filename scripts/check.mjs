@@ -1,16 +1,12 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { originalHash } from './build.mjs';
+import { checkerRunners } from './build.mjs';
 
 const original = readFileSync('f4fchecker.js');
-assert.equal(createHash('sha256').update(original).digest('hex'), originalHash);
-const runner = readFileSync('extension/checker-runner.js');
-assert.notEqual(runner.indexOf(original), -1, 'runner must embed original bytes');
-const comparisonTail = original.subarray(original.indexOf(Buffer.from('    const followingSet =')));
-assert.notEqual(readFileSync('extension/safe-runner.js').indexOf(comparisonTail), -1,
-  'validated runner must retain the original comparison and output bytes');
+const { reference, production } = checkerRunners(original);
+assert.ok(readFileSync('extension/checker-runner.js').equals(reference), 'Reference runner is stale. Run npm run build.');
+assert.ok(readFileSync('extension/safe-runner.js').equals(production), 'Production runner is stale. Run npm run build.');
 const manifest = JSON.parse(readFileSync('extension/manifest.json', 'utf8'));
 assert.equal(manifest.manifest_version, 3);
 assert.deepEqual(manifest.permissions, ['storage', 'scripting', 'webRequest']);

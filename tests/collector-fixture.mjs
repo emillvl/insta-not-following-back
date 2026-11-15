@@ -8,7 +8,7 @@ export function collectorFixture(options = {}) {
   const followers=Array.from({length:size},(_,i)=>'account_'+String(i).padStart(5,'0'));
   const mutual=size>=200?[...followers.slice(0,97),followers[Math.floor(size/2)],followers[size-1]]:
     followers.slice(0,Math.min(99,size));
-  const following=size===0?[]:[...(options.followingEnd||options.mixedLinks ? followers.slice(0,113) : mutual),'missing'];
+  const following=size===0?[]:[...(options.followingEnd||options.mixedLinks||options.splitAccountLabels ? followers.slice(0,113) : mutual),'missing'];
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
   window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
   window.__retryAt=0;
@@ -27,8 +27,15 @@ export function collectorFixture(options = {}) {
     control.textContent=(type==='followers'&&options.rounded?'1K':names.length)+' '+type;
     if(type==='followers'&&options.smallerTotal)control.textContent=(names.length-(typeof options.smallerTotal==='number'?options.smallerTotal:1))+' '+type;
     if(type==='followers'&&options.exactTitle)control.title=String(names.length);
+    if(options.hiddenControls){
+      const hidden=control.cloneNode(false);
+      hidden.hidden=true;hidden.textContent='2 '+type;control.before(hidden);
+      const stale=document.createElement('span');
+      stale.style.display='none';stale.textContent='2';control.append(stale);
+    }
     control.onclick=event=>{
       event.preventDefault();__clicks.push('open:'+type);__actions.push({type:'open',list:type,at:Date.now()});
+      if(options.listRoute)history.replaceState(null,'',control.href);
       const limitingList=options.cooldownOnOpen&&type===(options.limitedList||'following');
       const limitedOpening=limitingList&&++limitedListOpens===1;
       if(limitedOpening){
@@ -40,7 +47,9 @@ export function collectorFixture(options = {}) {
       if(options.replaceWrapper){host=document.createElement('section');document.body.append(host);}
       window.__listOpenedAt=Date.now();
       const close=document.createElement('button');close.setAttribute('aria-label','Close');
-      close.onclick=()=>{__clicks.push('close:'+type);__actions.push({type:'close',list:type,at:Date.now()});dialog.remove();
+      close.onclick=()=>{__clicks.push('close:'+type);__actions.push({type:'close',list:type,at:Date.now()});
+        if(options.hideDialog)dialog.hidden=true;else dialog.remove();
+        if(options.listRoute)history.replaceState(null,'','/me/');
         if(type==='followers'&&options.changedCount)control.textContent=(names.length+1)+' followers';};
       if(limitedOpening||(limitingList&&options.staysEmpty)){
         if(options.busyShell)dialog.setAttribute('aria-busy','true');
@@ -57,11 +66,18 @@ export function collectorFixture(options = {}) {
           if(name===names.at(-2))row.href='https://www.instagram.com/'+name+'/?source=fixture';
           if(name===names.at(-1))row.removeAttribute('role');
         }
+        if(options.splitAccountLabels&&type==='following'&&names.slice(-6).includes(name)){
+          row.removeAttribute('role');
+          row.innerHTML='<span>@'+name+'</span><span>Display name</span>';
+        }
         return row;};
       const append=(node,values)=>{const target=inner&&node===list?inner:node;for(const name of values)target.append(makeRow(name));};
       if(type==='following'&&options.followingEnd){
-        let loaded=111;
+        let loaded=['deepReenter','rapidRecycle'].includes(options.followingEnd)?108:111;
+        let leftPreloadZone=false;
         append(list,names.slice(0,loaded));
+        const lastRow=list.lastElementChild;
+        if(options.followingEnd==='rapidRecycle')lastRow.removeAttribute('role');
         const spacer=document.createElement('div');
         if(options.followingEnd==='spacer'){spacer.style.height='740px';list.append(spacer);}
         if(options.followingEnd==='footerLoader'){
@@ -74,11 +90,19 @@ export function collectorFixture(options = {}) {
           const wasAtEnd=before+this.clientHeight>=this.scrollHeight-2;
           scrollProperty.set.call(this,value);
           if(this.scrollTop===before)return;
+          if(__followingEndVisits&&this.scrollTop===0)leftPreloadZone=true;
           __scrolls++;__actions.push({type:'scroll',list:type,at:Date.now()});
           const reachedEnd=this.scrollTop+this.clientHeight>=this.scrollHeight-2;
           if(loaded<names.length&&reachedEnd&&!wasAtEnd){
             __followingEndVisits++;
             if(options.followingEnd==='reenter'&&__followingEndVisits===2)addRows();
+            if(options.followingEnd==='deepReenter'&&leftPreloadZone)addRows();
+            if(options.followingEnd==='rapidRecycle'){
+              for(const name of names.slice(loaded)){
+                lastRow.href='/'+name+'/';lastRow.textContent=name;
+              }
+              loaded=names.length;
+            }
             if(options.followingEnd==='multiple'&&__followingEndVisits%2===0)addRows(loaded+1);
             if(['spacer','footerLoader'].includes(options.followingEnd)){spacer.remove();addRows();}
             if(options.followingEnd==='limited'){
@@ -170,6 +194,13 @@ export function collectorFixture(options = {}) {
         spinner.style.height='8px';placeholder.append(spinner);host.append(placeholder);
         setTimeout(()=>{placeholder.remove();setTimeout(()=>host.append(dialog),options.replacementGap??0)},100);
       }else host.append(dialog);
+      if(options.competingDialog){
+        dialog.setAttribute('aria-label',type);
+        const other=document.createElement('section');other.setAttribute('role','dialog');
+        other.setAttribute('aria-label',type==='following'?'Followers':'Following');
+        other.append(makeRow('wrong_list_account'));host.insertBefore(other,dialog);
+        const closeList=close.onclick;close.onclick=()=>{closeList();other.remove();};
+      }
       if(options.replaceDialog&&type==='followers')for(let i=0;i<(options.replaceTimes??1);i++)setTimeout(replaceDialog,(options.replaceAfter??100)+i*(options.replacementInterval??400));
       if(options.closeDuringLoad&&type==='followers')setTimeout(()=>dialog.remove(),500);
     };
