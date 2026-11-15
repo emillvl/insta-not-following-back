@@ -31,6 +31,7 @@ async function run(options, baseline = false, real = false) {
     originalSummary: document.getElementById('closeF4FBox')?.parentElement.querySelector('div').textContent.trim(),
     resultsPresent: Boolean(document.getElementById('closeF4FBox')),
     followingEndVisits: __followingEndVisits, comparisonCreated: __comparisonCreated,
+    searches: __searches,
     dialogsRemaining: document.querySelectorAll('[role="dialog"]:not([hidden])').length,
     listElapsedMs: Date.now() - window.__listOpenedAt,
     actions: __actions, waits: __waits, retryAt: __retryAt }));
@@ -55,6 +56,9 @@ try {
     { name: '111 of 114 following rows need a fresh arrival at the end', size: 114, followingEnd: 'reenter' },
     { name: '108 of 114 need to leave the pagination preload zone before retrying', size: 114, followingEnd: 'deepReenter' },
     { name: 'six accounts reusing one plain link in a frame are all captured', size: 114, followingEnd: 'rapidRecycle' },
+    { name: 'duplicate server entries are reconciled by exact account searches', size: 114, reconcile: 'search' },
+    { name: 'missing followers are verified by the native Remove action', size: 114, reconcile: 'search', reconcileList: 'followers' },
+    { name: 'duplicate server entries are reconciled from visible follow relationships', size: 114, reconcile: 'reverse' },
     { name: 'each stalled batch can be rechecked after more rows arrive', size: 114, followingEnd: 'multiple' },
     { name: 'pending 60-second following batch needs no fresh scroll', size: 114, followingEnd: 'pending', followingDelay: 60000 },
     { name: 'unmounted area below the last captured row is crossed in overlapping steps', size: 114, followingEnd: 'spacer' },
@@ -98,6 +102,13 @@ try {
       const visits = { reenter: 2, deepReenter: 2, rapidRecycle: 1, multiple: 6, pending: 1, spacer: 1, footerLoader: 1, limited: 2 };
       assert.equal(result.followingEndVisits, visits[options.followingEnd]);
     }
+    if (options.reconcile) {
+      assert.deepEqual(result.done.validation.following, { expected: 114, collected: 114 });
+      const searches = options.reconcile === 'search' ? ['account_00020', 'account_00021', 'account_00022'] : [];
+      assert.deepEqual(result.searches.map(search => search.value), searches);
+      assert.ok(result.searches.every(search => search.list === (options.reconcileList || 'following')));
+      for (let i = 1; i < result.searches.length; i++) assert.ok(result.searches[i].at - result.searches[i - 1].at >= 1500);
+    }
     if (options.cooldown || options.cooldownOnOpen) {
       const pauseStarted = result.retryAt - (options.cooldown || options.cooldownOnOpen);
       const retries = result.actions.filter(action => action.list === (options.limitedList || 'following') && action.at > pauseStarted);
@@ -134,6 +145,8 @@ try {
   for (const options of timingOnly ? [] : [
     { name: 'stalled list', size: 1000, mode: 'stall', reason: 'incomplete_scan' },
     { name: '111 of 114 following rows remain incomplete after one recheck', size: 114, followingEnd: 'stall', reason: 'incomplete_scan' },
+    { name: 'an exact search suggestion without a following relationship is not accepted', size: 114,
+      reconcile: 'invalid', reason: 'incomplete_scan' },
     { name: 'cooldown beyond the list deadline reports the rate limit', size: 114, followingEnd: 'limited', cooldown: 3600000, reason: 'rate_limited' },
     { name: 'busy follower list remains at 0 of 114 after the allowed recovery', size: 114,
       cooldownOnOpen: 60000, limitedList: 'followers', emptyShell: true, busyShell: true, staysEmpty: true, reason: 'incomplete_scan' },
@@ -152,8 +165,13 @@ try {
     if (options.followingEnd === 'stall') {
       assert.equal(result.failed.message, 'F4F Checker verified 111 of 114 accounts you follow. No comparison was made.');
       assert.equal(result.followingEndVisits, 2);
-      assert.equal(result.scrolls, 3);
-      assert.ok(result.listElapsedMs <= 114000, 'the stalled following scan exceeded the new wait budget');
+      assert.equal(result.actions.filter(action => action.list === 'following' && action.type === 'scroll').length, 3);
+      const firstClose = result.actions.find(action => action.list === 'following' && action.type === 'close');
+      assert.ok(firstClose.at - result.actions[0].at <= 114000, 'the stalled following scan exceeded the wait budget');
+    }
+    if (options.reconcile === 'invalid') {
+      assert.match(result.failed.message, /verified 113 of 114 accounts you follow/);
+      assert.ok(result.searches.some(search => search.value === 'account_00021'));
     }
     if (options.cooldown) {
       assert.equal(result.followingEndVisits, 1);

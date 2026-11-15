@@ -83,6 +83,16 @@ the labelled list page, then returns the names from a settled scan. The original
 page adds names it had missed and checks the combined total. The worker closes
 the temporary tab and discards responses from other tabs or accounts.
 
+If the list has settled with fewer unique accounts than the profile count,
+the collector retains it and reads the other list. A Following action on a
+specific Followers row can verify that account as a mutual follow. If a shortfall
+remains and the other list supplies a small set of candidates, the collector
+uses the native list search with those exact usernames. Results must match the
+username and expose an affirmative relationship action for the list being
+checked. Checks use the normal scroll cadence and observe Instagram’s cooldown
+across up to 14 exact searches per scan. Both totals are checked again before
+comparison.
+
 The worker observes first-party HTTP 429 responses in the top frame of the
 scanning tab. It honors `Retry-After` as seconds or an HTTP date and uses one-,
 two- and four-minute waits when no usable header is present. During the wait,

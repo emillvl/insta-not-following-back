@@ -71,7 +71,10 @@ accounts reset that allowance. Each list has a 20-minute limit.
 If the normal list stays short, the checker opens that profile’s `/following/`
 or `/followers/` address once in a temporary tab. It keeps the accounts already
 collected and adds accounts from the settled list page. It closes the temporary
-tab and verifies the combined count before comparing.
+tab when the page check finishes. If Instagram repeats accounts across both
+pages, the checker finishes reading both lists. It uses visible follow states
+and a small number of exact searches for usernames already seen in the other
+list. Results require both verified totals.
 
 If Instagram returns HTTP 429 in the scanning tab, the checker pauses list
 loading until the `Retry-After` time and keeps the accounts it has collected.

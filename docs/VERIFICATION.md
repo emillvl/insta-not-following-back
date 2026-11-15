@@ -2,6 +2,15 @@
 
 ## 15 November 2026
 
+A signed-in trace captured 114 entries from Instagram’s Following responses,
+including repeated account IDs. The final page had no next page, and the
+checker captured all 111 distinct usernames. The 1.0.9 regression fixture gives
+both the normal list and its direct page those same duplicate counts. The
+extension finishes reading Followers, checks three exact usernames, and
+verifies 114 distinct Following accounts. Separate cases cover visible mutual
+follow evidence and a matching suggestion without the required relationship.
+The latter remains incomplete.
+
 Browser fixtures reproduce a shortfall of 108 out of 114 with the previous
 collector. Six plain links were missed when their usernames and display names
 were in separate elements. A separate fixture needed to leave the pagination

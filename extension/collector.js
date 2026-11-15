@@ -12,8 +12,14 @@ globalThis.F4FCollector = (() => {
   const MAX_DIALOG_RECOVERIES = 4;
   const DIALOG_RECOVERY_MS = 3000;
   const LIST_LIMIT_MS = 20 * 60 * 1000;
+  const MAX_EXACT_SEARCHES = 14;
+  const SEARCH_FIELDS = 'input[type="search"], input[type="text"], input:not([type])';
+  const RELATIONSHIP_LABELS = {
+    following: new Set(['following', 'takiptesin', 'takip ediliyor']),
+    followers: new Set(['remove', 'follows you', 'kaldır', 'seni takip ediyor'])
+  };
   let username, active, counts, current, lastFailure, lastProgress = 0;
-  const reports = {};
+  const lists = {};
   function failure(message, reason = 'incomplete_scan') {
     lastFailure = new Error(message);
     lastFailure.reason = reason;
@@ -214,14 +220,36 @@ globalThis.F4FCollector = (() => {
       return bounds.bottom > top && bounds.top < top + area.clientHeight;
     });
   }
-  function countError(triedDirectPage = false) {
-    const list = current.type === 'following' ? 'accounts you follow' : 'followers';
-    if (validateSize()) return failure(`Instagram’s ${current.type} list did not finish loading. No comparison was made.`);
-    const attempt = triedDirectPage ? ` after trying Instagram’s /${current.type}/ page` : '';
-    return failure(`F4F Checker verified ${current.users.size} of ${current.expected} ${list}${attempt}. No comparison was made.`);
+  function countError(type, collected, expected, triedDirectPage = false) {
+    const list = type === 'following' ? 'accounts you follow' : 'followers';
+    if (collected >= expected) return failure(`Instagram’s ${type} list did not finish loading. No comparison was made.`);
+    const attempt = triedDirectPage ? ` after trying Instagram’s /${type}/ page` : '';
+    return failure(`F4F Checker verified ${collected} of ${expected} ${list}${attempt}. No comparison was made.`);
   }
   function validateSize() {
     return current.users.size >= current.expected;
+  }
+  function confirmedNames(scope, type) {
+    const confirmed = new Set();
+    for (const control of scope.querySelectorAll('button, [role="button"], [role="status"]')) {
+      const labels = [control.textContent, control.getAttribute('aria-label'), control.getAttribute('title')];
+      if (!labels.some(label => RELATIONSHIP_LABELS[type].has(label?.trim().toLowerCase())) ||
+        control.closest('header, nav, [role="tab"]') || !F4FSelectors.visible(control)) continue;
+      for (let row = control.parentElement; row && row !== scope; row = row.parentElement) {
+        if (row.querySelector(SEARCH_FIELDS)) break;
+        const names = new Set([...row.querySelectorAll(ROWS)].map(anchor => accountName(anchor)?.toLowerCase()).filter(Boolean));
+        if (names.size === 1) confirmed.add(names.values().next().value);
+        if (names.size) break;
+      }
+    }
+    return confirmed;
+  }
+  function rememberFollowingEvidence() {
+    const following = lists.following;
+    if (current.direct || current.type !== 'followers' || !following || following.accounts.length >= counts.following) return;
+    const scope = captureScope();
+    if (!scope) return;
+    for (const name of confirmedNames(scope, 'following')) following.confirmed.add(name);
   }
   function step(blockedFor) {
     const area = current.area;
@@ -268,7 +296,7 @@ globalThis.F4FCollector = (() => {
     if (link && F4FSelectors.listFromHref(link.href)) window.addEventListener('click', cancelDefault);
     try { control.click(); } finally { window.removeEventListener('click', cancelDefault); }
   }
-  async function openDialog() {
+  async function openDialog(observe = true) {
     const { type } = current;
     let clickedAfter = -1, openingDeadline = 0;
     while (true) {
@@ -285,7 +313,8 @@ globalThis.F4FCollector = (() => {
       }
       if (dialog) {
         current.handledLimit = clickedAfter;
-        observeDialog(dialog);
+        if (observe) observeDialog(dialog);
+        else current.dialog = dialog;
         await wait(OPEN_MS);
         return;
       }
@@ -315,20 +344,22 @@ globalThis.F4FCollector = (() => {
       current = null;
     }
   }
-  async function recoverList() {
-    if (current.direct || !F4FBridge.recoverList) throw lastFailure || countError();
+  async function recoverList(settled = false) {
+    const { type, expected } = current;
+    if (current.direct || !F4FBridge.recoverList) throw lastFailure || countError(type, current.users.size, expected);
     await closeDialog();
     await waitForInstagram();
     const result = await F4FBridge.recoverList(current.type, current.expected, current.users.size, current.deadline);
     check();
     if (result?.reason === 'rate_limited') throw failure(result.message, result.reason);
     for (const name of result?.accounts || []) current.users.add(name);
-    if (!validateSize()) throw countError(true);
-    return finishList();
+    const triedDirectPage = true;
+    if (validateSize() || ((settled || Array.isArray(result?.accounts)) && current.users.size)) return finishList(triedDirectPage);
+    throw countError(type, current.users.size, expected, triedDirectPage);
   }
   async function collect() {
     check();
-    if (current.expected === 0) { reports[current.type] = { expected: 0, collected: 0 }; return []; }
+    if (current.expected === 0) return finishList();
     if (!current.dialog) return recoverList();
     await wait(SETUP_MS);
     let previousHeight = 0, previousSize = 0, noNewUsers = 0, stableLoops = 0;
@@ -350,6 +381,7 @@ globalThis.F4FCollector = (() => {
         capture(captureScope());
       }
       flush();
+      rememberFollowingEvidence();
       const area = current.area;
       const height = area?.scrollHeight || 0;
       const bottom = area ? height - area.clientHeight : 0;
@@ -375,9 +407,11 @@ globalThis.F4FCollector = (() => {
         stalledAt ??= now;
         const stalledFor = now - stalledAt;
         if (stalledFor >= LOAD_STALL_MS) {
-          if (current.direct && atEnd && !pending) return finishList();
-          if (!current.direct && !validateSize() && F4FBridge.recoverList) return recoverList();
-          throw countError();
+          const settled = atEnd && !pending;
+          if (current.direct && settled) return finishList();
+          if (!current.direct && !validateSize() && F4FBridge.recoverList) return recoverList(settled);
+          if (settled && current.users.size) return finishList();
+          throw countError(current.type, current.users.size, current.expected);
         }
         if (!rechecked && (resumedFromLimit || stalledFor >= RECHECK_MS)) {
           if (!pending && atEnd && area && top > 2) {
@@ -408,10 +442,11 @@ globalThis.F4FCollector = (() => {
     }
     return finishList();
   }
-  function finishList() {
-    reports[current.type] = { expected: current.expected, collected: current.users.size };
+  function finishList(triedDirectPage = false) {
+    const accounts = [...current.users];
+    lists[current.type] = { accounts, deadline: current.deadline, triedDirectPage, confirmed: new Set() };
     progress(true);
-    return [...current.users];
+    return accounts;
   }
   function clickClose(dialog) {
     for (const label of F4FSelectors.closeLabels) {
@@ -425,7 +460,11 @@ globalThis.F4FCollector = (() => {
     await closeDialog();
     const finished = current.type === 'followers';
     current = null;
-    if (finished) validation();
+    if (finished) {
+      verifyProfileTotals();
+      await reconcileLists();
+      validation();
+    }
   }
   async function closeDialog() {
     current.observer?.disconnect();
@@ -442,12 +481,87 @@ globalThis.F4FCollector = (() => {
     if (current.dialog) await wait(CLOSE_MS);
     current.dialog = null;
   }
-  function validation() {
+  function searchField(dialog) {
+    const fields = [...dialog.querySelectorAll(SEARCH_FIELDS)]
+      .filter(input => !input.disabled && !input.readOnly && F4FSelectors.visible(input));
+    const search = fields.filter(input => input.type === 'search' || input.getAttribute('role') === 'searchbox' ||
+      ['search', 'ara'].includes((input.getAttribute('aria-label') || input.placeholder).trim().toLowerCase()));
+    if (search.length === 1) return search[0];
+    return fields.length === 1 ? fields[0] : null;
+  }
+  async function searchExact(input, name) {
+    const value = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    value.set.call(input, name);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const handle = name.toLowerCase();
+    for (let pass = 0; pass < 4; pass++) {
+      await wait(STEP_MS);
+      await waitForInstagram();
+      const dialog = listView(false);
+      if (!dialog || searchField(dialog)?.value.toLowerCase() !== handle) continue;
+      current.dialog = dialog;
+      const scope = scrollArea(dialog) || dialog;
+      if (confirmedNames(scope, current.type).has(handle)) return true;
+    }
+    return false;
+  }
+  async function reconcileLists() {
+    let remainingSearches = MAX_EXACT_SEARCHES;
+    for (const type of ['following', 'followers']) {
+      const list = lists[type];
+      if (list.accounts.length >= counts[type]) continue;
+      const other = lists[type === 'following' ? 'followers' : 'following'].accounts;
+      const existing = new Set(list.accounts.map(name => name.toLowerCase()));
+      const candidates = new Map(other.filter(name => !existing.has(name.toLowerCase())).map(name => [name.toLowerCase(), name]));
+      for (const handle of list.confirmed) {
+        if (!candidates.has(handle)) continue;
+        list.accounts.push(candidates.get(handle));
+        candidates.delete(handle);
+      }
+      const missing = counts[type] - list.accounts.length;
+      if (missing <= 0 || candidates.size < missing || candidates.size > remainingSearches || Date.now() >= list.deadline) continue;
+
+      await wait(CLOSE_MS);
+      current = { type, expected: counts[type], users: new Set(list.accounts), deadline: list.deadline };
+      try {
+        await openDialog(false);
+        await wait(SETUP_MS);
+        for (const name of candidates.values()) {
+          await waitForInstagram();
+          const dialog = listView(false);
+          const input = dialog && searchField(dialog);
+          if (!input) break;
+          current.dialog = dialog;
+          remainingSearches--;
+          if (!(await searchExact(input, name))) continue;
+          list.accounts.push(name);
+          current.users.add(name);
+          progress(true);
+          if (validateSize()) break;
+        }
+      } catch (error) {
+        if (error.reason !== 'page_readiness') throw error;
+      }
+      await closeDialog();
+      current = null;
+    }
+  }
+  function verifyProfileTotals() {
     check();
     for (const type of ['following', 'followers']) {
-      if (!reports[type] || F4FListControls.expectedCount(document, username, type) !== counts[type]) {
+      if (!lists[type] || F4FListControls.expectedCount(document, username, type) !== counts[type]) {
         throw failure('Your profile counts changed during checking. Retry to get a consistent result.');
       }
+    }
+  }
+  function validation() {
+    verifyProfileTotals();
+    const reports = {};
+    for (const type of ['following', 'followers']) {
+      const { accounts, triedDirectPage } = lists[type];
+      const expected = counts[type], collected = accounts.length;
+      if (collected < expected) throw countError(type, collected, expected, triedDirectPage);
+      reports[type] = { expected, collected };
     }
     return { verified: true, settled: true, following: { ...reports.following }, followers: { ...reports.followers } };
   }
@@ -455,7 +569,7 @@ globalThis.F4FCollector = (() => {
     current?.observer?.disconnect();
     if (current?.dialog && !current.inline && F4FSelectors.visible(current.dialog)) { try { clickClose(current.dialog); } catch {} }
     current = null;
-    for (const type of ['following', 'followers']) delete reports[type];
+    for (const type of ['following', 'followers']) delete lists[type];
   }
   return { prepare, open, collect, close, readListPage, validation, dispose, get lastFailure() { return lastFailure; } };
 })();

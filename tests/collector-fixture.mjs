@@ -8,10 +8,13 @@ export function collectorFixture(options = {}) {
   const followers=Array.from({length:size},(_,i)=>'account_'+String(i).padStart(5,'0'));
   const mutual=size>=200?[...followers.slice(0,97),followers[Math.floor(size/2)],followers[size-1]]:
     followers.slice(0,Math.min(99,size));
-  const following=size===0?[]:[...(options.followingEnd||options.mixedLinks||options.splitAccountLabels ? followers.slice(0,113) : mutual),'missing'];
+  const following=size===0?[]:[...(options.followingEnd||options.mixedLinks||options.splitAccountLabels||options.reconcile ? followers.slice(0,113) : mutual),'missing'];
+  const reconcileList=options.reconcileList||'following';
+  const omitted=(reconcileList==='following'?following:followers).slice(20,23);
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
   window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
   window.__retryAt=0;
+  window.__searches=[];
   let limitedListOpens=0;
   new MutationObserver(records=>{
     for(const record of records)for(const node of record.addedNodes){
@@ -71,8 +74,28 @@ export function collectorFixture(options = {}) {
           row.innerHTML='<span>@'+name+'</span><span>Display name</span>';
         }
         return row;};
-      const append=(node,values)=>{const target=inner&&node===list?inner:node;for(const name of values)target.append(makeRow(name));};
-      if(type==='following'&&options.followingEnd){
+      const relationshipRow=(name,label)=>{
+        const row=document.createElement('div'),button=document.createElement('button');
+        button.textContent=label;row.append(makeRow(name),button);return row;
+      };
+      const append=(node,values)=>{
+        const target=inner&&node===list?inner:node;
+        for(const name of values)target.append(options.reconcile==='reverse'&&type==='followers'&&omitted.includes(name)?
+          relationshipRow(name,'Following'):makeRow(name));
+      };
+      if(type===reconcileList&&options.reconcile){
+        const shown=names.filter(name=>!omitted.includes(name));
+        append(list,[...shown,...shown.slice(0,omitted.length)]);
+        if(options.reconcile!=='reverse'){
+          const search=document.createElement('input');search.type='search';dialog.append(search);
+          search.addEventListener('input',()=>{
+            const value=search.value;__searches.push({list:type,value,at:Date.now()});
+            const positive=names.includes(value)&&!(options.reconcile==='invalid'&&value===omitted[1]);
+            const label=type==='following'?'Following':'Remove';
+            list.replaceChildren(relationshipRow(value,positive?label:'Follow'),relationshipRow('unrelated',label));
+          });
+        }
+      }else if(type==='following'&&options.followingEnd){
         let loaded=['deepReenter','rapidRecycle'].includes(options.followingEnd)?108:111;
         let leftPreloadZone=false;
         append(list,names.slice(0,loaded));

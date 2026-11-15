@@ -34,6 +34,18 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       if(link.dataset.kind==='following'&&name==='missing')row.href='https://www.instagram.com/missing/';
       scroll.append(row);};
     names.forEach(addRow);
+    if(window.__searchableFollowing&&link.dataset.kind==='following'){
+      const search=document.createElement('input');search.type='search';dialog.append(search);
+      search.addEventListener('input',()=>{
+        const name=search.value;
+        (window.__searchedFollowing??=[]).push(name);
+        scroll.replaceChildren();
+        if(!window.__searchableFollowing.includes(name))return;
+        addRow(name);
+        const row=document.createElement('div'),status=document.createElement('button');
+        status.textContent='Following';row.append(scroll.firstElementChild,status);scroll.append(row);
+      });
+    }
     if(window.__limitFollowing&&link.dataset.kind==='following'){
       let atEnd=false,pending=false,loaded=false;
       scroll.addEventListener('scroll',async()=>{
@@ -299,6 +311,30 @@ try {
   assert.deepEqual(recovered.results.accounts.map(account => account.name), followingNames.slice(1, -1));
   assert.equal((await worker.evaluate(() => chrome.tabs.query({ url: 'https://www.instagram.com/*' }))).length, 1);
   console.log('PASS: both native list URLs are read when short, merging six missed accounts and closing the temporary tabs.');
+
+  const missingFromPages = followingNames.slice(20, 23);
+  const uniquePageRows = followingNames.filter(name => !missingFromPages.includes(name));
+  const repeatedPageRows = [...uniquePageRows, ...uniquePageRows.slice(0, 3)];
+  listPages.set('following', `<!doctype html><main><h1>Following</h1>${accountRows(repeatedPageRows)}</main>`);
+  await createdPage.evaluate(({ following, names }) => {
+    window.__listAccounts = { following, followers: names.slice(0, -1) };
+    window.__searchableFollowing = names;
+    document.querySelector('[data-kind="followers"]').textContent = '113 followers';
+  }, { following: repeatedPageRows, names: followingNames });
+  await worker.evaluate(() => chrome.storage.session.clear());
+  const reconciliationPopup = await context.newPage();
+  await reconciliationPopup.goto(`chrome-extension://${extensionId}/popup.html`);
+  context.on('page', captureListPage);
+  await reconciliationPopup.locator('#start').click();
+  const reconciled = await waitForOperation(state => state?.status === 'completed', 30000);
+  context.off('page', captureListPage);
+  await Promise.all(pageTasks);
+  assert.equal(openedListPages.at(-1), '/me/following/');
+  assert.deepEqual(await createdPage.evaluate(() => window.__searchedFollowing), missingFromPages);
+  assert.deepEqual(reconciled.validation.following, { expected: 114, collected: 114 });
+  assert.deepEqual(reconciled.validation.followers, { expected: 113, collected: 113 });
+  assert.deepEqual(reconciled.results.accounts, [{ name: 'follow_114', href: '/follow_114' }]);
+  console.log('PASS: when both Following pages return 114 rows with only 111 distinct accounts, the extension verifies the three missing members by exact search.');
 
   await createdPage.close();
   await worker.evaluate(() => chrome.storage.session.clear());
