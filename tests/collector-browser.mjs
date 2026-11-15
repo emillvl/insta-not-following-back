@@ -52,6 +52,7 @@ try {
     { name: 'dialog replacement', size: 1000, replaceDialog: true },
     { name: 'dialog replacement after a render gap', size: 1000, replaceDialog: true, replacementGap: 1200 },
     { name: 'opening dialog placeholder replacement', size: 1000, openingPlaceholder: true, replacementGap: 1200 },
+    { name: 'late follower scroll area with a connected loading shell', size: 300, lateScrollArea: true },
     { name: 'dialog ancestor wrapper replacement', size: 1000, replaceDialog: true, replaceWrapper: true, replacementGap: 1200 },
     { name: 'virtual dialog replacement midway through collection', size: 1000, mode: 'virtual', replaceAtScroll: 20, replacementGap: 1200 },
     { name: 'non-scrolling small lists', size: 2, mode: 'all' },

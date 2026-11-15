@@ -94,6 +94,11 @@ export function collectorFixture(options = {}) {
         },options.replacementGap??0);
       }
       dialog.append(close,list);
+      if(options.lateScrollArea&&type==='followers'){
+        const shell=document.createElement('div');shell.style.cssText='height:140px;overflow-y:auto';
+        list.replaceWith(shell);
+        setTimeout(()=>dialog.append(list),7000);
+      }
       if(options.openingPlaceholder&&type==='followers'){
         const placeholder=document.createElement('div');placeholder.setAttribute('role','dialog');
         const spinner=document.createElement('div');spinner.setAttribute('role','progressbar');

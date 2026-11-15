@@ -74,7 +74,8 @@ globalThis.F4FCollector = (() => {
   }
   function scrollArea(dialog) {
     const areas = [...dialog.querySelectorAll('div')].filter(node => node.clientHeight > 0 &&
-      (node.scrollHeight > node.clientHeight || /auto|scroll/.test(getComputedStyle(node).overflowY)));
+      (node.scrollHeight > node.clientHeight || /auto|scroll/.test(getComputedStyle(node).overflowY)) &&
+      node.querySelector(ROWS));
     return areas.reduce((best, node) => !best || node.scrollHeight > best.scrollHeight ? node : best, null);
   }
   function observeDialog(dialog) {
@@ -153,11 +154,14 @@ globalThis.F4FCollector = (() => {
     while (true) {
       check();
       if (!current.dialog.isConnected) { await ensureDialog(); stableLoops = 0; noNewUsers = 0; }
-      if (!current.area?.isConnected) {
-        current.area = scrollArea(current.dialog);
-        current.lastRow = null;
-        capture(current.area || current.dialog);
-        stableLoops = 0;
+      if (!current.dialog.contains(current.area) || !current.area.contains(current.lastRow)) {
+        const area = scrollArea(current.dialog);
+        if (area !== current.area) {
+          current.area = area;
+          current.lastRow = null;
+          stableLoops = 0;
+        }
+        capture(area || current.dialog);
       }
       flush();
       const area = current.area;

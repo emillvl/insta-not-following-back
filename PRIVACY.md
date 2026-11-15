@@ -1,6 +1,6 @@
 # F4F Checker privacy policy
 
-Last updated October 9, 2026. Covers F4F Checker 1.0.7.
+Last updated November 15, 2026. Covers F4F Checker 1.0.7 and 1.0.8.
 
 F4F Checker compares the following and follower lists shown in your signed-in Instagram session to identify accounts you follow that do not follow you back. The comparison runs in your browser when you start a check.
 
