@@ -24,7 +24,7 @@ Your appearance preference is saved separately in local extension storage and re
 
 The extension has no developer-operated server, analytics or direct network client. It does not upload follower lists, results or page content to the developer. Its clicks and scrolling cause Instagram's own website to load data through your normal signed-in connection. Opening a result link visits that profile on Instagram. Instagram operates independently and its own terms and privacy policy apply.
 
-The extension can use Instagram’s own list search in the scanning tab to verify a small number of usernames it has already read in your other list. Those search terms are sent to Instagram by its website.
+The extension can use Instagram’s own list search in the scanning tab to verify a small number of usernames it has already read in your other list. It skips rows marked deactivated. The website sends those search terms to Instagram.
 
 During a scan, the extension checks for HTTP 429 responses from Instagram in the checking tab and reads the `Retry-After` header to decide when to resume.
 

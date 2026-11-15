@@ -66,9 +66,8 @@ short of its total, it can rewind once to retrigger pagination. An unfinished
 list with a visible loader gets more time. Each list has a 20-minute limit.
 
 The scan stays in its Instagram tab. If a list still comes up short, the
-checker uses visible relationship labels from the lists first. The **Verifying
-missing accounts** message appears when it uses Instagram’s list search for
-usernames already seen in the other list. It stops searching as soon as the
+checker uses relationship labels from the lists first. Any additional exact
+searches run out of view, skip accounts marked deactivated, and stop once the
 total is verified. Results require both verified totals.
 
 If Instagram returns HTTP 429 in the scanning tab, the checker pauses list

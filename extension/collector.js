@@ -13,18 +13,20 @@ globalThis.F4FCollector = (() => {
   const DIALOG_RECOVERY_MS = 3000;
   const LIST_LIMIT_MS = 20 * 60 * 1000;
   const MAX_EXACT_SEARCHES = 14;
+  const VERIFYING = 'data-f4f-verifying';
   const SEARCH_FIELDS = 'input[type="search"], input[type="text"], input:not([type])';
+  const INACTIVE_LABELS = new Set(['deactivated account', 'deactivated']);
   const RELATIONSHIPS = {
     following: new Map([
       ['following', true], ['takiptesin', true], ['takip ediliyor', true],
       ['follow', false], ['follow back', false], ['requested', false],
-      ['takip et', false], ['geri takip et', false], ['istek gönderildi', false],
-      ['deactivated account', 'inactive']
+      ['takip et', false], ['geri takip et', false], ['istek gönderildi', false]
     ]),
     followers: new Map([['remove', true], ['follows you', true], ['kaldır', true], ['seni takip ediyor', true]])
   };
   let username, active, counts, current, lastFailure, lastProgress = 0;
   const lists = {};
+  const inertDialogs = new Set();
   function failure(message, reason = 'incomplete_scan') {
     lastFailure = new Error(message);
     lastFailure.reason = reason;
@@ -160,6 +162,7 @@ globalThis.F4FCollector = (() => {
   function bindArea(area) {
     if (area && !current.hasViewport) {
       current.users.clear();
+      current.evidence.clear();
       current.accountLinks = new WeakSet();
       current.hasViewport = true;
     }
@@ -225,32 +228,34 @@ globalThis.F4FCollector = (() => {
   }
   function recordState(states, name, state) {
     const previous = states.get(name);
-    if (previous === undefined || previous === 'inactive') states.set(name, state);
-    else if (state !== 'inactive' && previous !== state) states.set(name, null);
+    if (previous === undefined || state === 'inactive') states.set(name, state);
+    else if (previous !== 'inactive' && previous !== state) states.set(name, null);
   }
-  function relationshipStates(scope, type) {
+  function relationshipStates(scope, labels) {
     const states = new Map();
     for (const control of scope.querySelectorAll('button, [role="button"], [role="status"]')) {
-      const label = [control.innerText ?? control.textContent, control.getAttribute('aria-label'), control.getAttribute('title')]
-        .map(text => text?.trim().toLowerCase().replace(/\u0307/g, ''))
-        .find(text => RELATIONSHIPS[type].has(text));
-      if (!label || control.closest('header, nav, [role="tab"]') || !F4FSelectors.visible(control)) continue;
+      const values = [control.innerText ?? control.textContent, control.getAttribute('aria-label'), control.getAttribute('title')]
+        .map(text => text?.trim().toLowerCase().replace(/\u0307/g, ''));
+      const state = values.some(text => INACTIVE_LABELS.has(text)) ? 'inactive' :
+        labels?.get(values.find(text => labels.has(text)));
+      if (state === undefined || control.closest('header, nav, [role="tab"]') || !F4FSelectors.visible(control)) continue;
       for (let row = control.parentElement; row && row !== scope; row = row.parentElement) {
         if (row.querySelector(SEARCH_FIELDS)) break;
         const names = new Set([...row.querySelectorAll(ROWS)].map(anchor => accountName(anchor)).filter(Boolean));
-        if (names.size === 1) recordState(states, names.values().next().value, RELATIONSHIPS[type].get(label));
+        if (names.size === 1) recordState(states, names.values().next().value, state);
         if (names.size) break;
       }
     }
     return states;
   }
-  function rememberFollowingEvidence() {
-    const following = lists.following;
-    if (!current.evidenceDirty || current.type !== 'followers' || !following?.evidence) return;
+  function rememberEvidence() {
+    const following = current.type === 'following';
+    if (!current.evidenceDirty || (!following && lists.following.accounts.length >= counts.following)) return;
     current.evidenceDirty = false;
     const scope = captureScope();
     if (!scope) return;
-    for (const [name, state] of relationshipStates(scope, 'following')) recordState(following.evidence, name, state);
+    const labels = following ? undefined : RELATIONSHIPS.following;
+    for (const [name, state] of relationshipStates(scope, labels)) recordState(current.evidence, name, state);
   }
   function step(blockedFor) {
     const area = current.area;
@@ -282,7 +287,7 @@ globalThis.F4FCollector = (() => {
   }
   async function open(type) {
     check();
-    current = { type, expected: counts[type], users: new Set(), accountLinks: new WeakSet(),
+    current = { type, expected: counts[type], users: new Set(), accountLinks: new WeakSet(), evidence: new Map(),
       recoveries: 0, deadline: Date.now() + LIST_LIMIT_MS };
     progress(true);
     if (current.expected > 0) await openDialog();
@@ -311,7 +316,10 @@ globalThis.F4FCollector = (() => {
       if (dialog) {
         current.handledLimit = clickedAfter;
         if (observe) observeDialog(dialog);
-        else current.dialog = dialog;
+        else {
+          current.dialog = dialog;
+          concealDialog(dialog);
+        }
         await wait(OPEN_MS);
         return;
       }
@@ -341,7 +349,7 @@ globalThis.F4FCollector = (() => {
         capture(captureScope());
       }
       flush();
-      rememberFollowingEvidence();
+      rememberEvidence();
       const area = current.area;
       const height = area?.scrollHeight || 0;
       const bottom = area ? height - area.clientHeight : 0;
@@ -407,11 +415,8 @@ globalThis.F4FCollector = (() => {
   }
   function finishList() {
     const accounts = [...current.users];
-    const list = { accounts, deadline: current.deadline };
-    if (accounts.length < current.expected) {
-      list.searchable = Boolean(searchField(current.dialog));
-      if (current.type === 'following') list.evidence = new Map();
-    }
+    const list = { accounts, deadline: current.deadline, evidence: current.evidence };
+    if (accounts.length < current.expected) list.searchable = Boolean(searchField(current.dialog));
     lists[current.type] = list;
     progress(true);
     return accounts;
@@ -447,6 +452,11 @@ globalThis.F4FCollector = (() => {
     if (current.dialog) await wait(CLOSE_MS);
     current.dialog = null;
   }
+  function concealDialog(dialog) {
+    if (dialog.inert) return;
+    dialog.inert = true;
+    inertDialogs.add(dialog);
+  }
   function searchField(dialog) {
     const fields = [...dialog.querySelectorAll(SEARCH_FIELDS)]
       .filter(input => !input.disabled && !input.readOnly && F4FSelectors.visible(input));
@@ -466,6 +476,7 @@ globalThis.F4FCollector = (() => {
       const dialog = listView();
       if (!dialog || searchField(dialog)?.value.toLowerCase() !== name) return null;
       current.dialog = dialog;
+      concealDialog(dialog);
       const area = scrollArea(dialog);
       if (loading(area)) {
         busySince ??= Date.now();
@@ -474,7 +485,8 @@ globalThis.F4FCollector = (() => {
       }
       busySince = null;
       quietPasses++;
-      const state = relationshipStates(area || dialog, current.type).get(name);
+      const state = relationshipStates(area || dialog, RELATIONSHIPS[current.type]).get(name);
+      if (state === 'inactive') return false;
       if (state === true || state === false) return state;
     }
     return false;
@@ -482,19 +494,17 @@ globalThis.F4FCollector = (() => {
   function verificationCandidates(type) {
     const list = lists[type];
     if (list.accounts.length >= counts[type]) return [];
-    const other = lists[type === 'following' ? 'followers' : 'following'].accounts;
+    const other = lists[type === 'following' ? 'followers' : 'following'];
     const existing = new Set(list.accounts);
-    const candidates = [], inactive = [];
-    for (const name of other) {
+    const candidates = [];
+    for (const name of other.accounts) {
       if (existing.has(name)) continue;
-      const state = list.evidence?.get(name);
+      const state = other.evidence.get(name);
       if (state === true) list.accounts.push(name);
-      else if (state === 'inactive') inactive.push(name);
-      else if (state !== false) candidates.push(name);
+      else if (state !== 'inactive' && state !== false) candidates.push(name);
     }
     const missing = counts[type] - list.accounts.length;
     if (missing <= 0) return [];
-    candidates.push(...inactive);
     return list.searchable && candidates.length >= missing && candidates.length <= MAX_EXACT_SEARCHES &&
       Date.now() < list.deadline ? candidates : null;
   }
@@ -509,7 +519,7 @@ globalThis.F4FCollector = (() => {
       const input = dialog && searchField(dialog);
       if (!input) break;
       current.dialog = dialog;
-      if (!searches) F4FBridge.warning?.('running', 'Verifying missing accounts through Instagram’s list search.');
+      concealDialog(dialog);
       searches++;
       const confirmed = await searchExact(input, name);
       if (confirmed === null) break;
@@ -525,7 +535,10 @@ globalThis.F4FCollector = (() => {
     const following = verificationCandidates('following');
     const followers = verificationCandidates('followers');
     let searches = 0;
-    if (following && followers?.length) searches = await verifyCandidates(followers);
+    if (following && followers?.length) {
+      document.documentElement.setAttribute(VERIFYING, '');
+      searches = await verifyCandidates(followers);
+    }
     await closeDialog();
     current = null;
     if (!following?.length || searches + following.length > MAX_EXACT_SEARCHES ||
@@ -533,6 +546,7 @@ globalThis.F4FCollector = (() => {
 
     verifyProfileTotals();
     await wait(CLOSE_MS);
+    document.documentElement.setAttribute(VERIFYING, '');
     current = { type: 'following', expected: counts.following, users: new Set(lists.following.accounts),
       deadline: lists.following.deadline };
     try {
@@ -567,6 +581,9 @@ globalThis.F4FCollector = (() => {
   function dispose() {
     current?.observer?.disconnect();
     if (current?.dialog && F4FSelectors.visible(current.dialog)) { try { clickClose(current.dialog); } catch {} }
+    for (const dialog of inertDialogs) dialog.inert = false;
+    inertDialogs.clear();
+    document.documentElement.removeAttribute(VERIFYING);
     current = null;
     for (const type of ['following', 'followers']) delete lists[type];
   }

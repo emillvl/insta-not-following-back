@@ -32,6 +32,8 @@ async function run(options, baseline = false, real = false) {
     resultsPresent: Boolean(document.getElementById('closeF4FBox')),
     followingEndVisits: __followingEndVisits, comparisonCreated: __comparisonCreated,
     searches: __searches,
+    verificationLeftOpen: document.documentElement.hasAttribute('data-f4f-verifying') ||
+      Boolean(document.querySelector('[role="dialog"][inert]')),
     dialogsRemaining: document.querySelectorAll('[role="dialog"]:not([hidden])').length,
     elapsedMs: Date.now() - __actions[0]?.at,
     listElapsedMs: Date.now() - window.__listOpenedAt,
@@ -60,7 +62,7 @@ try {
     { name: 'duplicate server entries are reconciled by exact account searches', size: 114, reconcile: 'search', caseVariants: true },
     { name: 'missing followers are verified in the already open dialog', size: 114, reconcile: 'search', reconcileList: 'followers' },
     { name: 'duplicate server entries are reconciled from visible follow relationships', size: 114, reconcile: 'reverse' },
-    { name: 'checks skip Follow Back and defer deactivated accounts when the active candidates are enough', size: 114, reconcile: 'targeted' },
+    { name: 'checks skip Follow Back and deactivated accounts while recovering active entries', size: 114, reconcile: 'targeted' },
     { name: 'exact searches wait for a visible loader before typing the next name', size: 114, reconcile: 'search', searchDelay: 11000 },
     { name: 'each stalled batch can be rechecked after more rows arrive', size: 114, followingEnd: 'multiple' },
     { name: 'pending 60-second following batch needs no fresh scroll', size: 114, followingEnd: 'pending', followingDelay: 60000 },
@@ -95,6 +97,7 @@ try {
     assert.equal(result.failed, undefined, `${options.name}: ${JSON.stringify(result)}`);
     assert.ok(result.done, `${options.name}: no completion`);
     assert.deepEqual(result.done.accounts, options.size === 0 ? [] : ['missing'], options.name);
+    assert.equal(result.verificationLeftOpen, false);
     const followerTotal = options.size + (options.reconcile === 'targeted' ? 2 : 0);
     assert.deepEqual(result.done.validation.followers, { expected: followerTotal - (options.smallerTotal || 0), collected: followerTotal });
     if (options.mixedLinks || options.splitAccountLabels || options.outsideLinks) {
@@ -156,6 +159,10 @@ try {
     { name: '111 of 114 following rows remain incomplete after one recheck', size: 114, followingEnd: 'stall', reason: 'incomplete_scan' },
     { name: 'an exact search suggestion without a following relationship is not accepted', size: 114,
       reconcile: 'invalid', reason: 'incomplete_scan' },
+    { name: 'a deactivated candidate is never searched for a missing Following entry', size: 114,
+      reconcile: 'inactive', reason: 'incomplete_scan' },
+    { name: 'deactivated candidates are never searched for a missing Followers entry', size: 114,
+      reconcile: 'inactive', reconcileList: 'followers', reason: 'incomplete_scan' },
     { name: 'cooldown beyond the list deadline reports the rate limit', size: 114, followingEnd: 'limited', cooldown: 3600000, reason: 'rate_limited' },
     { name: 'busy follower list remains at 0 of 114 after the allowed recovery', size: 114,
       cooldownOnOpen: 60000, limitedList: 'followers', emptyShell: true, busyShell: true, staysEmpty: true, reason: 'incomplete_scan' },
@@ -171,6 +178,7 @@ try {
     assert.equal(result.failed?.reason, options.reason, `${options.name}: ${JSON.stringify(result)}`);
     assert.equal(result.resultsPresent, false);
     assert.equal(result.comparisonCreated, false, `${options.name}: comparison was constructed before verification`);
+    assert.equal(result.verificationLeftOpen, false);
     if (options.followingEnd === 'stall') {
       assert.equal(result.failed.message, 'F4F Checker verified 111 of 114 accounts you follow. No comparison was made.');
       assert.equal(result.followingEndVisits, 2);
@@ -182,6 +190,12 @@ try {
     if (options.reconcile === 'invalid') {
       assert.match(result.failed.message, /verified 113 of 114 accounts you follow/);
       assert.ok(result.searches.some(search => search.value === 'account_00021'));
+    }
+    if (options.reconcile === 'inactive') {
+      const list = options.reconcileList === 'followers' ? 'followers' : 'accounts you follow';
+      assert.equal(result.failed.message, `F4F Checker verified 113 of 114 ${list}. No comparison was made.`);
+      assert.deepEqual(result.searches, []);
+      assert.equal(result.clicks.filter(click => click.startsWith('open:')).length, 2);
     }
     if (options.cooldown) {
       assert.equal(result.followingEndVisits, 1);

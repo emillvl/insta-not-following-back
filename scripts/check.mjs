@@ -21,7 +21,8 @@ for (const size of [16, 32, 48, 128]) {
   if (size !== 128) assert.equal(manifest.action.default_icon?.[size], path);
 }
 const files = [manifest.action.default_popup, manifest.background.service_worker,
-  ...manifest.content_scripts.flatMap(entry => entry.js), 'collector.js', 'adapter.js', 'checker-runner.js', 'safe-runner.js', 'popup.css', 'popup.js',
+  ...manifest.content_scripts.flatMap(entry => [...entry.js, ...(entry.css || [])]),
+  'collector.js', 'adapter.js', 'checker-runner.js', 'safe-runner.js', 'popup.css', 'popup.js',
   'icons/logo-light-128.png', 'icons/logo-512.png', 'icons/logo-1024.png'];
 for (const file of files) readFileSync(`extension/${file}`);
 for (const file of readdirSync('extension').filter(name => name.endsWith('.js'))) {

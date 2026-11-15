@@ -7,8 +7,11 @@ including repeated account IDs. The final page had no next page, and the
 checker captured all 111 distinct usernames. The unpacked 1.1.0 integration
 fixture reproduces the duplicate counts and recovers 114 distinct Following
 accounts with one visible Following status and two exact searches. It uses the
-original browser tab and the same-document list routes. The test checks that the
-Follow Back and deactivated rows are skipped and that the result is exact.
+original browser tab and the same-document list routes. The test checks that
+the lookup dialog is hidden when it opens and inert during searches, that
+Follow Back and deactivated candidates are skipped, and that the result is
+exact. Separate fixtures verify zero searches when the only candidates are
+marked deactivated.
 
 With the test clock, the duplicate-row fixture took 69 seconds in 1.1.0 and
 163 seconds in the 1.0.9 collector with its optional direct-page retry absent.

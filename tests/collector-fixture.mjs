@@ -10,7 +10,7 @@ export function collectorFixture(options = {}) {
     followers.slice(0,Math.min(99,size));
   const following=size===0?[]:[...(options.followingEnd||options.mixedLinks||options.splitAccountLabels||options.reconcile ? followers.slice(0,113) : mutual),'missing'];
   const reconcileList=options.reconcileList||'following';
-  const omitted=(reconcileList==='following'?following:followers).slice(20,23);
+  const omitted=(reconcileList==='following'?following:followers).slice(20,options.reconcile==='inactive'?21:23);
   if(options.reconcile==='targeted')followers.unshift('fan_only','deactivated_name');
   window.__clicks=[];window.__scrolls=0;window.__alerts=[];window.__progress=[];window.__added=0;
   window.__actions=[];window.__waits=[];window.__followingEndVisits=0;window.__comparisonCreated=false;
@@ -84,8 +84,12 @@ export function collectorFixture(options = {}) {
       const append=(node,values)=>{
         const target=inner&&node===list?inner:node;
         for(const name of values){
-          const label=type==='followers'&&(followerLabels[name]||
+          let label=type==='followers'&&(followerLabels[name]||
             (options.reconcile==='reverse'&&omitted.includes(name)?'Following':''));
+          if(options.reconcile==='inactive'&&type!==reconcileList){
+            if(omitted.includes(name)||(type==='following'&&name==='missing'))label='Deactivated';
+            else if(type==='followers'&&name===followers.at(-1))label='Follow Back';
+          }
           target.append(label?relationshipRow(name,label):makeRow(name));
         }
       };

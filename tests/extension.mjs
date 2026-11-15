@@ -46,6 +46,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       search.addEventListener('input',()=>{
         const name=search.value;
         (window.__searchedFollowing??=[]).push(name);
+        (window.__searchPresentation??=[]).push([getComputedStyle(dialog).opacity,dialog.inert]);
         scroll.replaceChildren();
         if(!window.__searchableFollowing.includes(name))return;
         addRow(name);
@@ -71,7 +72,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       const placeholder=document.createElement('div');placeholder.setAttribute('role','dialog');
       document.body.append(placeholder);
       queueMicrotask(()=>{placeholder.replaceWith(dialog);window.__dialogReplacements=(window.__dialogReplacements||0)+1;});
-    }else document.body.append(dialog);
+    }else {
+      document.body.append(dialog);
+      window.__followingPresentation?.push(getComputedStyle(dialog).opacity);
+    }
   }
   </script></body></html>`;
 const key = join(profile, 'fixture-key.pem');
@@ -294,6 +298,7 @@ try {
     window.__listAccounts = { following, followers: ['fan', 'deactivated_name', ...names.slice(0, -1)] };
     window.__followerStates = { fan: 'Follow Back', deactivated_name: 'Deactivated account', [confirmed]: 'Following' };
     window.__searchableFollowing = names;
+    window.__followingPresentation = [];
     document.querySelector('[data-kind="following"]').textContent = '114 following';
     document.querySelector('[data-kind="followers"]').textContent = '114 followers';
   }, { following: followingRows, names: followingNames, confirmed: missingNames[0] });
@@ -309,10 +314,13 @@ try {
   assert.equal(openedTabs, 0);
   assert.deepEqual(listNavigations, []);
   assert.deepEqual(await createdPage.evaluate(() => window.__searchedFollowing), missingNames.slice(1));
+  assert.deepEqual(await createdPage.evaluate(() => window.__followingPresentation), ['1', '0']);
+  assert.deepEqual(await createdPage.evaluate(() => window.__searchPresentation), [['0', true], ['0', true]]);
+  await createdPage.waitForFunction(() => !document.documentElement.hasAttribute('data-f4f-verifying'));
   assert.deepEqual(reconciled.validation.following, { expected: 114, collected: 114 });
   assert.deepEqual(reconciled.validation.followers, { expected: 114, collected: 115 });
   assert.deepEqual(reconciled.results.accounts, [{ name: 'follow_114', href: '/follow_114' }]);
-  console.log('PASS: 114 Following rows with 111 unique names recover using visible proof and two exact searches in the original tab.');
+  console.log('PASS: 114 Following rows with 111 unique names recover using row evidence and two hidden, inert searches in the original tab.');
 
   await createdPage.close();
   await worker.evaluate(() => chrome.storage.session.clear());

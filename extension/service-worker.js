@@ -65,6 +65,7 @@ async function foreground(tabId) {
 async function ensureContent(tabId) {
   try { await chrome.tabs.sendMessage(tabId, { type: 'F4F_PING' }); }
   catch {
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ['verification.css'] });
     await chrome.scripting.executeScript({ target: { tabId }, files: ['theme.js', 'localization.js', 'list-controls.js', 'content.js'] });
   }
 }

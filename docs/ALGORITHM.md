@@ -81,10 +81,11 @@ If the list has settled with fewer unique accounts than the profile count,
 the collector retains it and reads the other list. A Following action on a
 specific Followers row can verify that account as a mutual follow. A
 Follow Back or Requested action rules out a current outgoing follow. If a
-shortfall remains, the collector searches only eligible usernames from the
-opposite list, putting accounts marked deactivated last. A search result must
-match the username and expose an affirmative relationship for the list being
-checked. The collector can verify missing followers in the already open list.
+shortfall remains, the collector searches eligible usernames from the opposite
+list and skips rows marked deactivated. It hides the search dialog and makes it
+inert while verifying. A search result must match the username and expose an
+affirmative relationship for the list being checked. The collector can verify
+missing followers in the already open list.
 It limits a scan to 14 exact searches, spaces them at least 1,500 ms apart, and
 waits for visible search loaders before sending the next name. Both totals are
 checked again before comparison.

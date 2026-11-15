@@ -23,7 +23,8 @@ function harness(initialTabs = [], initialOperation) {
     action: { setBadgeText: async args => calls.push(['badge', args.text]), setBadgeBackgroundColor: async () => {} },
     webRequest: { onHeadersReceived: { addListener: fn => { headersReceived = fn; } } },
     windows: { update: async (id, args) => { calls.push(['focus', id, args]); } },
-    scripting: { executeScript: async args => { calls.push(['inject', args]); } },
+    scripting: { executeScript: async args => { calls.push(['inject', args]); },
+      insertCSS: async args => { calls.push(['style', args]); } },
     tabs: {
       query: async query => [...tabs.values()].filter(tab => query.url ?
         /^https:\/\/(www\.)?instagram\.com\//.test(tab.url) : tab.active),
@@ -155,12 +156,19 @@ test('a list that stays empty after a cooldown reports the stall without a compa
 test('start on another website reuses and foregrounds Instagram with no unrelated access', async () => {
   const h = harness([{ id: 1, url: 'https://youtube.com/', active: true },
     { id: 2, url: 'https://www.instagram.com/explore/' }]);
+  const send = h.chrome.tabs.sendMessage;
+  h.chrome.tabs.sendMessage = (id, message) => {
+    if (message.type === 'F4F_PING') throw new Error('No content script');
+    return send(id, message);
+  };
   const result = await h.dispatch({ type: 'F4F_START' });
   assert.equal(result.status, 'waiting');
   assert.equal(result.tabId, 2);
   assert.ok(h.calls.some(call => call[0] === 'activate' && call[1] === 2 && call[2].active));
   assert.ok(h.calls.some(call => call[0] === 'focus'));
   assert.ok(!h.calls.some(call => call[0] === 'create'));
+  assert.deepEqual(structuredClone(h.calls.find(call => call[0] === 'style')[1]),
+    { target: { tabId: 2 }, files: ['verification.css'] });
 });
 test('start creates one visible tab when none exists and duplicate starts reuse it', async () => {
   const h = harness([{ id: 1, url: 'https://google.com/', active: true }]);

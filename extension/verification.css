@@ -1,0 +1,9 @@
+:root[data-f4f-verifying] [role="dialog"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: none !important;
+}
+
+:root[data-f4f-verifying] [role="dialog"]::backdrop {
+  background: transparent !important;
+}
