@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="236" viewBox="0 0 920 236" role="img" aria-labelledby="title desc">
+  <title id="title">F4F Checker</title>
+  <desc id="desc">Following, minus followers. A purple illustration of two account lists and the difference between them.</desc>
+  <defs>
+    <linearGradient id="panel" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#16111F"/>
+      <stop offset="1" stop-color="#27152F"/>
+    </linearGradient>
+    <linearGradient id="accent">
+      <stop stop-color="#9551E0"/>
+      <stop offset=".46" stop-color="#E65BA0"/>
+      <stop offset="1" stop-color="#F6AF60"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#9548C7" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#9548C7" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#EAD2FB" opacity=".14"/>
+    </pattern>
+    <clipPath id="round">
+      <rect width="920" height="236" rx="26"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <path fill="url(#panel)" d="M0 0h920v236H0z"/>
+    <ellipse cx="765" cy="114" rx="303" ry="200" fill="url(#glow)"/>
+    <path fill="url(#grid)" d="M535 0h385v236H535z"/>
+    <path d="M598 236V164a62 62 0 0 1 62-62h260M771 0v62a52 52 0 0 0 52 52h97" fill="none" stroke="#BD8BE2" opacity=".2"/>
+    <rect width="920" height="4" fill="url(#accent)"/>
+  </g>
+  <rect x=".5" y=".5" width="919" height="235" rx="25.5" fill="none" stroke="#634574"/>
+
+  <g font-family="system-ui, Segoe UI, sans-serif">
+    <rect x="48" y="43" width="44" height="44" rx="14" fill="#31203E" stroke="#6C4A81"/>
+    <g fill="#D79DF7" font-weight="800" letter-spacing="-1">
+      <text x="55.11" y="70.75" font-size="15">f4f</text>
+      <path d="M77 63l5-5m-4 0h4v4" fill="none" stroke="#D79DF7" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text x="108" y="70" fill="#D6B9E8" font-size="13" letter-spacing="2.1" font-weight="700">INSTAGRAM BROWSER EXTENSION</text>
+    <text x="46" y="151" fill="#FBF5FF" font-size="69" font-weight="780" letter-spacing="-4">F4F Checker</text>
+    <text x="50" y="188" fill="#D6B9E8" font-size="22" font-weight="500">Following, minus followers.</text>
+
+    <g font-size="11" font-weight="700" letter-spacing="1.3">
+      <rect x="597" y="38" width="177" height="116" rx="14" fill="#23182E" stroke="#755184"/>
+      <text x="615" y="63" fill="#E2C8F1">FOLLOWING</text>
+      <path d="M615 75h140" stroke="#5A3D69"/>
+      <g fill="#AB77CD">
+        <circle cx="621" cy="90" r="4"/>
+        <circle cx="621" cy="108" r="4"/>
+        <circle cx="621" cy="126" r="4"/>
+      </g>
+      <path d="M634 90h62m-62 18h48m-48 18h56" stroke="#74508A" stroke-width="4" stroke-linecap="round"/>
+
+      <rect x="713" y="76" width="157" height="104" rx="14" fill="#291B35" stroke="#865A9C"/>
+      <text x="731" y="101" fill="#E2C8F1">FOLLOWERS</text>
+      <path d="M731 113h120" stroke="#694479"/>
+      <g fill="#BD8CDB">
+        <circle cx="737" cy="129" r="4"/>
+        <circle cx="737" cy="146" r="4"/>
+      </g>
+      <path d="M750 129h54m-54 17h42" stroke="#8961A0" stroke-width="4" stroke-linecap="round"/>
+
+      <rect x="645" y="162" width="209" height="39" rx="19.5" fill="#432953" stroke="#B473D9"/>
+      <circle cx="665" cy="181.5" r="5" fill="#F2A6CA"/>
+      <text x="680" y="185.5" fill="#FAE9FF">NOT FOLLOWING BACK</text>
+    </g>
+  </g>
+</svg>
