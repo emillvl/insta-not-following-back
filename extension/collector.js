@@ -398,7 +398,7 @@ globalThis.F4FCollector = (() => {
       }
       if (!F4FSelectors.visible(current.dialog)) {
         await ensureDialog();
-        // A limit may have arrived while waiting for the replacement.
+        // Check for a 429 again after the dialog returns.
         stableLoops = 0; noNewUsers = 0;
         continue;
       }
@@ -570,6 +570,7 @@ globalThis.F4FCollector = (() => {
     }
   }
   async function resetSearchField(field) {
+    // Reset the value in Instagram's page so its input tracker sees the change.
     field.setAttribute(REPLAY_INPUT, '');
     try { return await F4FBridge.resetSearchField(); }
     finally { field.removeAttribute(REPLAY_INPUT); }

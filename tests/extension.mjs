@@ -155,7 +155,7 @@ try {
   await reopened.goto(`chrome-extension://${extensionId}/popup.html`);
   await reopened.locator('#view').waitFor({ state: 'visible' });
   assert.equal(await reopened.locator('input, form').count(), 0);
-  assert.match(await reopened.locator('#title').textContent(), /Checking Complete/);
+  assert.equal(await reopened.locator('#title').textContent(), 'Check complete');
   assert.equal(await reopened.locator('#appearance').inputValue(), 'dark');
   await instagram.waitForFunction(() => document.querySelector('[data-f4f-results]').getAttribute('data-f4f-theme') === 'dark');
   assert.equal(await instagram.locator('[data-f4f-results]').evaluate(box => getComputedStyle(box).backgroundColor), 'rgb(12, 16, 20)');
@@ -222,7 +222,7 @@ try {
   assert.deepEqual(operation.validation.followers, { expected: 2, collected: 4 });
   assert.deepEqual(operation.validation.following, { expected: 2, collected: 4 });
   assert.deepEqual(operation.results.accounts, [{ name: 'missing', href: '/missing' }]);
-  assert.match(operation.results.summary, /Takip Ettiğin: 4 \| Takipçi: 4/);
+  assert.equal(operation.results.summary, 'Following 4 · Followers 4');
   console.log('PASS: real MV3 completion retains deactivated rows above displayed counts after settling.');
   await createdPage.evaluate(() => { window.__includeDeactivated = false; document.querySelector('[data-kind="following"]').textContent = '3 following'; });
   await worker.evaluate(() => chrome.storage.session.clear());

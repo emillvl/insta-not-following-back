@@ -15,7 +15,7 @@
   "content_scripts": [{
     "matches": ["https://www.instagram.com/*", "https://instagram.com/*"],
     "css": ["verification.css"],
-    "js": ["theme.js", "localization.js", "list-controls.js", "content.js"],
+    "js": ["theme.js", "localization.js", "list-controls.js", "result-copy.js", "content.js"],
     "run_at": "document_idle"
   }],
   "content_security_policy": {

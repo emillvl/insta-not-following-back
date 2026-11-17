@@ -8,12 +8,12 @@ el('appearance').addEventListener('change', async event => {
   el('appearance-error').hidden = true;
   try { await F4FTheme.setPreference(event.target.value); }
   catch {
-    el('appearance-error').textContent = 'Your appearance choice could not be saved. Please try again.';
+    el('appearance-error').textContent = "Couldn't save your appearance setting. Try again.";
     el('appearance-error').hidden = false;
   }
 });
 const titles = { idle: 'Ready to check?', navigating: 'Opening Instagram', waiting: 'Getting ready',
-  running: 'Checking in progress…', completed: 'Checking Complete', error: 'Checking stopped' };
+  running: 'Checking your lists', completed: 'Check complete', error: 'Checking stopped' };
 let operation = { status: 'idle' };
 let busy = false;
 let cooldownTimer;
@@ -35,28 +35,31 @@ function render(next) {
     }, Math.min(remaining, 2 ** 31 - 1));
   } else if (remaining <= 0 && reason === 'rate_limited') {
     reason = status === 'running' ? 'waiting_for_instagram' : undefined;
-    message = reason ? 'The cooldown ended. Waiting for Instagram to load the list.' :
-      'The Instagram cooldown ended. You can retry checking.';
+    message = reason ? 'The wait is over. Instagram is loading the list.' : 'You can retry now.';
   }
-  el('indicator').className = `indicator ${active ? 'running' : status}`;
-  el('symbol').textContent = status === 'completed' ? '✓' : status === 'error' ? '!' : active ? '•••' : '↗';
-  el('title').textContent = status === 'waiting' && reason === 'login_required' ?
+  const needsLogin = status === 'waiting' && reason === 'login_required';
+  const onHold = reason === 'rate_limited' && remaining > 0;
+  const result = status === 'completed' && next.results ? F4FResultCopy(next.results) : null;
+  el('indicator').className = `indicator ${needsLogin || onHold ? 'waiting' : active ? 'running' : status}`;
+  el('symbol').textContent = needsLogin ? '🔑' : onHold ? '⏳' : status === 'completed' ? '✓' :
+    status === 'error' ? '⚠️' : active ? '•••' : '↗';
+  el('title').textContent = needsLogin ?
     'Login required' : reason === 'rate_limited' ? 'Instagram rate limit' :
     reason === 'waiting_for_instagram' ? 'Waiting for Instagram' :
     status === 'error' && ['incomplete_scan', 'unverified_count'].includes(reason) ?
     'Incomplete scan' : titles[status] || titles.idle;
-  el('message').textContent = status === 'idle' ? 'See which accounts you follow don’t follow you back.' : message;
-  el('reminder').textContent = active ? 'Please keep the Instagram tab open and active. Switching tabs may interrupt or delay checking.' :
-    status === 'completed' ? 'Your results are ready on Instagram.' :
-    'Instagram will open in an active tab. Keep it active while checking.';
+  el('message').hidden = Boolean(result) || status === 'navigating';
+  el('message').textContent = status === 'idle' ? "See who doesn't follow you back on Instagram." : message || '';
+  el('reminder').hidden = !(status === 'idle' || (active && !needsLogin));
   el('start').hidden = status !== 'idle' && status !== 'error';
-  el('start').textContent = status === 'error' ? 'Retry Checking' : 'Start Checking →';
+  el('start').textContent = status === 'error' ? 'Retry Checking' : 'Start Checking';
   el('view').hidden = status !== 'completed';
   el('again').hidden = status !== 'completed';
   el('continue').hidden = !active;
-  el('continue').textContent = reason === 'login_required' ? 'Continue After Login' : 'Return to Instagram';
-  el('result-summary').hidden = status !== 'completed' || !next.results;
-  el('result-summary').textContent = next.results ? `${next.results.heading}\n${next.results.summary}` : '';
+  el('continue').textContent = needsLogin ? 'Continue After Login' : 'Return to Instagram';
+  el('result-summary').hidden = !result;
+  el('result-heading').textContent = result?.heading || '';
+  el('result-totals').textContent = result?.summary || '';
   document.querySelectorAll('button').forEach(button => {
     button.disabled = busy || (remaining > 0 && ['start', 'again'].includes(button.id));
   });

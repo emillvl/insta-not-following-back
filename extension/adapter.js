@@ -18,7 +18,7 @@ globalThis.F4FAdapter = {
       try {
         if (collector) await collector.prepare(() => bridge.running);
         await checker({ document: adaptedDocument, alert: message => {
-          originalError = collector?.lastFailure || new Error(message);
+          originalError = collector?.lastFailure || new Error(collector ? message.replace(/^Hata: /, '') : message);
         } });
         if (originalError) throw originalError;
         box = document.getElementById('closeF4FBox')?.parentElement;

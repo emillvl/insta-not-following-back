@@ -17,10 +17,12 @@ to keep Instagram active. Counts above the displayed total are labelled with
 "profile shows" rather than treated as an error. Completion requires settled
 lists and enough collected accounts, including deactivated rows.
 
-Completed shows the original Turkish result fields, View Results, and Check
-Again. An incomplete scan offers Retry Checking and hides View Results.
-Other errors explain how to resume. A storage error keeps the verified on-page
-list available.
+The completed card shows the English result heading and list totals with View
+Results and Check Again below. The on-page result uses the same English labels
+when reopening a result saved with the original Turkish labels. The sign-in,
+timed wait, and error icons accompany text that explains each state. An
+incomplete scan offers Retry Checking. A storage error keeps the verified
+on-page list available.
 
 Appearance is available in every state. System follows the computer's live
 light/dark preference; Light and Dark override it. The choice is stored locally.
