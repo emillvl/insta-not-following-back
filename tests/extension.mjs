@@ -36,8 +36,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       const search=document.createElement('input');search.type='search';dialog.append(search);
       search.addEventListener('input',()=>{
         const name=search.value;
+        const focused=document.activeElement===search;
         (window.__searchedFollowing??=[]).push(name);
-        (window.__searchPresentation??=[]).push([getComputedStyle(dialog).opacity,dialog.inert]);
+        (window.__searchPresentation??=[]).push([getComputedStyle(dialog).opacity,dialog.inert,focused]);
+        if(!focused)return;
         scroll.replaceChildren();
         if(!window.__searchableFollowing.includes(name))return;
         addRow(name);
@@ -65,7 +67,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       queueMicrotask(()=>{placeholder.replaceWith(dialog);window.__dialogReplacements=(window.__dialogReplacements||0)+1;});
     }else {
       document.body.append(dialog);
-      window.__followingPresentation?.push(getComputedStyle(dialog).opacity);
+      queueMicrotask(()=>window.__followingPresentation?.push(getComputedStyle(dialog).opacity));
     }
   }
   </script></body></html>`;
@@ -284,12 +286,12 @@ try {
   assert.deepEqual(listNavigations, []);
   assert.deepEqual(await createdPage.evaluate(() => window.__searchedFollowing), missingNames.slice(1));
   assert.deepEqual(await createdPage.evaluate(() => window.__followingPresentation), ['1', '0']);
-  assert.deepEqual(await createdPage.evaluate(() => window.__searchPresentation), [['0', true], ['0', true]]);
-  await createdPage.waitForFunction(() => !document.documentElement.hasAttribute('data-f4f-verifying'));
+  assert.deepEqual(await createdPage.evaluate(() => window.__searchPresentation), [['0', false, true], ['0', false, true]]);
+  await createdPage.waitForFunction(() => !document.querySelector('[data-f4f-verifying]'));
   assert.deepEqual(reconciled.validation.following, { expected: 114, collected: 114 });
   assert.deepEqual(reconciled.validation.followers, { expected: 114, collected: 115 });
   assert.deepEqual(reconciled.results.accounts, [{ name: 'follow_114', href: '/follow_114' }]);
-  console.log('PASS: 114 Following rows with 111 unique names recover using row evidence and two hidden, inert searches in the original tab.');
+  console.log('PASS: 114 Following rows with 111 unique names recover using row evidence and two focused searches with a hidden dialog.');
 
   await createdPage.close();
   await worker.evaluate(() => chrome.storage.session.clear());

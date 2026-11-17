@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { collectorFixture } from './collector-fixture.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.F4F_PLAYWRIGHT_PATH || 'playwright');
-const browser = await chromium.launch({ channel: process.env.F4F_BROWSER_CHANNEL || 'msedge', headless: true });
+const browser = await chromium.launch({ channel: process.env.F4F_BROWSER_CHANNEL || 'msedge', headless: true,
+  args: ['--no-proxy-server', '--host-resolver-rules=MAP * ~NOTFOUND'] });
 const records = [];
 const extensionPath = process.env.F4F_TEST_EXTENSION || 'extension';
 const scaleAudit = process.argv.includes('--scale-audit');
@@ -28,6 +29,8 @@ async function run(options, baseline = false, real = false) {
   if (baseline) {
     void page.evaluate(readFileSync('f4fchecker.js', 'utf8')).catch(() => {});
   } else {
+    const verificationStyle = join(extensionPath, 'verification.css');
+    if (existsSync(verificationStyle)) await page.addStyleTag({ content: readFileSync(verificationStyle, 'utf8') });
     for (const file of ['localization.js', 'list-controls.js', 'collector.js', 'adapter.js', 'safe-runner.js']) {
       await page.addScriptTag({ content: readFileSync(join(extensionPath, file), 'utf8') });
       if (file === 'collector.js' && (options.followingEnd === 'deepReenter' || options.reconcile)) {
@@ -57,7 +60,7 @@ async function run(options, baseline = false, real = false) {
     resultsPresent: Boolean(document.getElementById('closeF4FBox')),
     followingEndVisits: __followingEndVisits, comparisonCreated: __comparisonCreated,
     searches: __searches,
-    verificationLeftOpen: document.documentElement.hasAttribute('data-f4f-verifying') ||
+    verificationLeftOpen: Boolean(document.querySelector('[data-f4f-verifying]')) ||
       Boolean(document.querySelector('[role="dialog"][inert]')),
     dialogsRemaining: document.querySelectorAll('[role="dialog"]:not([hidden])').length,
     elapsedMs: Date.now() - __actions[0]?.at,
@@ -94,12 +97,13 @@ try {
     { name: '111 of 114 following rows need a fresh arrival at the end', size: 114, followingEnd: 'reenter' },
     { name: '108 of 114 need to leave the pagination preload zone before retrying', size: 114, followingEnd: 'deepReenter' },
     { name: 'six accounts reusing one plain link in a frame are all captured', size: 114, followingEnd: 'rapidRecycle' },
+    { name: 'checks skip Follow Back and deactivated accounts while recovering active entries', size: 114, reconcile: 'targeted' },
     { name: 'duplicate server entries are reconciled by exact account searches', size: 114, reconcile: 'search', caseVariants: true },
     { name: 'missing followers are verified in the already open dialog', size: 114, reconcile: 'search', reconcileList: 'followers' },
     { name: 'duplicate server entries are reconciled from visible follow relationships', size: 114, reconcile: 'reverse' },
     { name: 'an explicit Follows you label verifies missing followers without searching', size: 114,
       reconcile: 'reverse', reconcileList: 'followers' },
-    { name: 'checks skip Follow Back and deactivated accounts while recovering active entries', size: 114, reconcile: 'targeted' },
+    { name: 'hidden searches survive a field or dialog remount', size: 114, reconcile: 'targeted', searchFieldGap: 2500 },
     { name: 'exact searches wait for a visible loader before typing the next name', size: 114, reconcile: 'search', searchDelay: 11000 },
     { name: 'each stalled batch can be rechecked after more rows arrive', size: 114, followingEnd: 'multiple' },
     { name: 'pending 60-second following batch needs no fresh scroll', size: 114, followingEnd: 'pending', followingDelay: 60000 },
@@ -154,6 +158,8 @@ try {
       const searches = options.reconcile === 'reverse' ? [] : ['account_00020', 'account_00021', 'account_00022'];
       if (options.reconcile === 'targeted') searches.shift();
       assert.deepEqual(result.searches.map(search => search.value), searches);
+      assert.ok(result.searches.every(search => search.focused && search.opacity === '0'));
+      if (options.searchFieldGap) assert.equal(result.searches.at(-1).replacementOpacity, '0');
       assert.ok(result.searches.every(search => search.list === (options.reconcileList || 'following')));
       for (let i = 1; i < result.searches.length; i++) {
         assert.ok(result.searches[i].at - result.searches[i - 1].at >= (options.searchDelay || 1500));

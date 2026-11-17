@@ -103,7 +103,10 @@ export function collectorFixture(options = {}) {
         if(options.reconcile!=='reverse'){
           const search=document.createElement('input');search.type='search';dialog.append(search);
           search.addEventListener('input',()=>{
-            const value=search.value;__searches.push({list:type,value,at:Date.now()});
+            const value=search.value,focused=document.activeElement===search;
+            const entry={list:type,value,at:Date.now(),focused,opacity:getComputedStyle(dialog).opacity};
+            __searches.push(entry);
+            if(!focused)return;
             const positive=names.includes(value)&&!(options.reconcile==='invalid'&&value===omitted[1]);
             const label=type==='following'?'Following':'Remove';
             const render=()=>{
@@ -111,7 +114,20 @@ export function collectorFixture(options = {}) {
               list.replaceChildren(relationshipRow(value,positive?label:'Follow'),relationshipRow('unrelated',label));
               if(options.reconcile==='ambiguous'&&value===omitted[1])list.append(relationshipRow(value,'Follow Back'));
             };
-            if(options.searchDelay){
+            if(options.searchFieldGap){
+              const replace=value===omitted.at(-1);
+              search.remove();list.replaceChildren();
+              if(replace)dialog.remove();
+              setTimeout(()=>{
+                if(replace){
+                  const next=document.createElement('div');
+                  next.setAttribute('role','dialog');next.setAttribute('aria-label',type);
+                  next.append(...dialog.childNodes);host.append(next);dialog=next;
+                  queueMicrotask(()=>{entry.replacementOpacity=getComputedStyle(dialog).opacity;});
+                }
+                dialog.prepend(search);render();
+              },options.searchFieldGap);
+            }else if(options.searchDelay){
               dialog.setAttribute('aria-busy','true');
               setTimeout(render,options.searchDelay);
             }else render();

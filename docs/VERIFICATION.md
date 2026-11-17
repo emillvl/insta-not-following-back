@@ -1,5 +1,20 @@
 # Verification
 
+## Hidden search regression
+
+A local browser fixture reproduced the 112-of-114 error. It starts with 114
+Following rows containing 111 distinct usernames. One Followers row confirms
+another outgoing follow. The last two lookups use a search handler that requires
+focus. The revised extension keeps the dialog transparent while both search
+inputs receive focus and verifies all 114 usernames. A fixture also covers a
+search field or list dialog that temporarily unmounts while a result loads.
+
+The earlier signed-in trace documents repeated account IDs and a terminal page.
+Two archived native reads at a displayed count of 114 returned 111 and 110
+distinct accounts, respectively. The diagnostics counted zero deactivation
+flags among the returned Following accounts. The omitted identities and their
+deactivation status remain unknown.
+
 ## 15 November 2026, version 1.1.0
 
 The prior signed-in trace captured 114 Following records with repeated IDs and

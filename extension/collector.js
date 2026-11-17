@@ -12,6 +12,7 @@ globalThis.F4FCollector = (() => {
   const DIALOG_RECOVERY_MS = 3000;
   const MAX_EXACT_SEARCHES = 4;
   const VERIFYING = 'data-f4f-verifying';
+  const REPLAY_INPUT = 'data-f4f-search-replay';
   const SEARCH_FIELDS = 'input[type="search"], input[type="text"], input:not([type])';
   const STATUS_CONTROLS = 'button, [role="button"], [role="status"]';
   const INACTIVE_LABELS = new Set(['deactivated account', 'deactivated']);
@@ -24,9 +25,9 @@ globalThis.F4FCollector = (() => {
     ]),
     followers: new Map([...FOLLOWS_YOU, ['remove', true], ['kaldır', true]])
   };
-  let username, active, counts, deadline, current, lastFailure, lastProgress, searchesLeft;
+  let username, active, counts, deadline, current, lastFailure, lastProgress, searchesLeft, verificationObserver;
   const lists = {};
-  const inertDialogs = new Set();
+  const concealedDialogs = new Set();
   function failure(message, reason = 'incomplete_scan') {
     lastFailure = new Error(message);
     lastFailure.reason = reason;
@@ -507,7 +508,8 @@ globalThis.F4FCollector = (() => {
     current.observer?.disconnect();
     const end = Date.now() + 2500;
     while (current.dialog) {
-      const dialog = F4FSelectors.visible(current.dialog) ? current.dialog : listView();
+      const dialog = verificationObserver ? verificationView() :
+        F4FSelectors.visible(current.dialog) ? current.dialog : listView();
       if (!dialog) break;
       current.dialog = dialog;
       if (Date.now() >= end) throw failure('Instagram’s list could not be closed. Close it and retry checking.', 'page_readiness');
@@ -518,9 +520,32 @@ globalThis.F4FCollector = (() => {
     current.dialog = null;
   }
   function concealDialog(dialog) {
-    if (dialog.inert) return;
-    dialog.inert = true;
-    inertDialogs.add(dialog);
+    if (concealedDialogs.has(dialog)) return;
+    dialog.setAttribute(VERIFYING, '');
+    concealedDialogs.add(dialog);
+  }
+  function verificationView() {
+    let dialog = current.dialog;
+    if (!dialog || !F4FSelectors.visible(dialog)) {
+      dialog = listView();
+      if (!dialog || (!listTitle(dialog, current.type) && !searchField(dialog))) return null;
+    }
+    current.dialog = dialog;
+    concealDialog(dialog);
+    return dialog;
+  }
+  function startVerification() {
+    verificationView();
+    verificationObserver = new MutationObserver(() => {
+      if (!current.dialog || !F4FSelectors.visible(current.dialog)) verificationView();
+    });
+    verificationObserver.observe(document.body, { childList: true, subtree: true });
+  }
+  function stopVerification() {
+    verificationObserver?.disconnect();
+    verificationObserver = null;
+    for (const dialog of concealedDialogs) dialog.removeAttribute(VERIFYING);
+    concealedDialogs.clear();
   }
   function searchField(dialog) {
     const fields = [...dialog.querySelectorAll(SEARCH_FIELDS)]
@@ -530,29 +555,51 @@ globalThis.F4FCollector = (() => {
     if (search.length === 1) return search[0];
     return fields.length === 1 ? fields[0] : null;
   }
-  async function searchExact(input, name) {
+  async function focusSearchField() {
+    const end = Date.now() + DIALOG_RECOVERY_MS;
+    while (true) {
+      await waitForInstagram();
+      const dialog = verificationView();
+      const field = dialog && searchField(dialog);
+      if (field) {
+        field.focus({ preventScroll: true });
+        if (document.activeElement === field) return field;
+      }
+      if (Date.now() >= end) return null;
+      await wait(100);
+    }
+  }
+  async function resetSearchField(field) {
+    field.setAttribute(REPLAY_INPUT, '');
+    try { return await F4FBridge.resetSearchField(); }
+    finally { field.removeAttribute(REPLAY_INPUT); }
+  }
+  async function searchExact(input, name, requiredSearches) {
     const value = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
     const typeName = field => {
       searchesLeft--;
       value.set.call(field, name);
-      field.dispatchEvent(new Event('input', { bubbles: true }));
+      field.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true,
+        inputType: 'insertReplacementText', data: name }));
     };
     typeName(input);
     let quietPasses = 0, busySince = null;
     while (quietPasses < 4) {
       await wait(STEP_MS);
       const retry = await waitForInstagram();
-      const dialog = listView();
-      const field = dialog && searchField(dialog);
-      if (field?.value.toLowerCase() !== name) return null;
-      current.dialog = dialog;
-      concealDialog(dialog);
       if (retry && F4FBridge.rateStatus.rateLimit.list === current.type) {
-        if (!searchesLeft) return null;
+        if (searchesLeft < requiredSearches) return null;
+        const field = await focusSearchField();
+        if (!field) return null;
+        if (field.value === name && !await resetSearchField(field)) return null;
+        check();
+        if (document.activeElement !== field) return null;
         typeName(field);
         quietPasses = 0; busySince = null;
         continue;
       }
+      const dialog = verificationView();
+      if (!dialog) { quietPasses++; continue; }
       const area = scrollArea(dialog);
       if (loading(area)) {
         busySince ??= Date.now();
@@ -561,6 +608,7 @@ globalThis.F4FCollector = (() => {
       }
       busySince = null;
       quietPasses++;
+      if (searchField(dialog)?.value.toLowerCase() !== name) continue;
       const state = relationshipStates(area || dialog, RELATIONSHIPS[current.type]).get(name);
       if (state === 'inactive') return false;
       if (state === true || state === false) return state;
@@ -581,45 +629,48 @@ globalThis.F4FCollector = (() => {
     }
     const missing = counts[type] - list.accounts.length;
     if (missing <= 0) return [];
-    return list.searchable && candidates.length >= missing && candidates.length <= searchesLeft ? candidates : null;
+    return list.searchable && candidates.length >= missing ? candidates : null;
   }
-  async function verifyCandidates(candidates) {
+  async function verifyCandidates(candidates, reservedSearches = 0) {
     current.observer?.disconnect();
     const list = lists[current.type];
     for (const [index, name] of candidates.entries()) {
-      if (Math.min(candidates.length - index, searchesLeft) < current.expected - list.accounts.length) break;
-      await waitForInstagram();
-      const dialog = listView();
-      const input = dialog && searchField(dialog);
+      const missing = current.expected - list.accounts.length;
+      if (!missing || candidates.length - index < missing || searchesLeft < missing + reservedSearches) break;
+      const input = await focusSearchField();
       if (!input) break;
-      current.dialog = dialog;
-      concealDialog(dialog);
-      const confirmed = await searchExact(input, name);
+      const confirmed = await searchExact(input, name, missing + reservedSearches);
       if (confirmed === null) break;
       if (!confirmed) continue;
       list.accounts.push(name);
       current.users.add(name);
       progress(true);
-      if (validateSize()) break;
     }
   }
   async function reconcileLists() {
     const following = verificationCandidates('following');
     const followers = verificationCandidates('followers');
-    const canVerify = following && followers && following.length + followers.length <= searchesLeft;
+    const missingFollowing = Math.max(0, counts.following - lists.following.accounts.length);
+    const missingFollowers = Math.max(0, counts.followers - lists.followers.accounts.length);
+    const canVerify = following && followers && missingFollowing + missingFollowers <= searchesLeft;
+    if (current.users.size < lists.followers.accounts.length) {
+      current.users = new Set(lists.followers.accounts);
+      progress(true);
+    }
     if (canVerify && followers.length) {
-      document.documentElement.setAttribute(VERIFYING, '');
-      await verifyCandidates(followers);
+      startVerification();
+      await verifyCandidates(followers, missingFollowing);
     }
     await closeDialog();
+    stopVerification();
     current = null;
-    if (!canVerify || !following.length || following.length > searchesLeft ||
+    if (!canVerify || !missingFollowing || missingFollowing > searchesLeft ||
       lists.followers.accounts.length < counts.followers) return;
 
     verifyProfileTotals();
     await wait(CLOSE_MS);
-    document.documentElement.setAttribute(VERIFYING, '');
     current = { type: 'following', expected: counts.following, users: new Set(lists.following.accounts) };
+    startVerification();
     try {
       await openDialog(false);
       await verifyCandidates(following);
@@ -627,6 +678,7 @@ globalThis.F4FCollector = (() => {
       if (error.reason !== 'page_readiness') throw error;
     }
     await closeDialog();
+    stopVerification();
     current = null;
   }
   function verifyProfileTotals() {
@@ -651,12 +703,11 @@ globalThis.F4FCollector = (() => {
   function dispose() {
     current?.observer?.disconnect();
     if (current?.dialog) {
-      const dialog = F4FSelectors.visible(current.dialog) ? current.dialog : listView();
+      const dialog = verificationObserver ? verificationView() :
+        F4FSelectors.visible(current.dialog) ? current.dialog : listView();
       if (dialog) { try { clickClose(dialog); } catch {} }
     }
-    for (const dialog of inertDialogs) dialog.inert = false;
-    inertDialogs.clear();
-    document.documentElement.removeAttribute(VERIFYING);
+    stopVerification();
     current = null;
     for (const type of ['following', 'followers']) delete lists[type];
   }

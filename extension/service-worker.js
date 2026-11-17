@@ -270,6 +270,19 @@ async function handle(message, sender) {
   if (!fromPage(sender, operation, message)) return { ignored: true };
   if (message.type === 'F4F_COOLDOWN_STATUS') return refreshCooldown(operation);
   if (message.type === 'F4F_RETRY') return claimRetry(operation);
+  if (message.type === 'F4F_RESET_SEARCH_FIELD' && operation.status === 'running' && operation.retryUsed &&
+    operation.documentId && Date.now() < operation.deadline) {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId: operation.tabId, documentIds: [operation.documentId] }, world: 'MAIN',
+      func: () => {
+        const field = document.activeElement;
+        if (!field?.matches('[role="dialog"][data-f4f-verifying] input[data-f4f-search-replay]')) return false;
+        field.value = '';
+        return true;
+      }
+    });
+    return { ok: injection?.result === true };
+  }
   if (message.type === 'F4F_WAIT_STATUS' && operation.status === 'waiting') {
     const username = message.reason === 'profile_navigation' &&
       typeof message.username === 'string' && USERNAME.test(message.username) ?

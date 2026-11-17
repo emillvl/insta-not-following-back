@@ -208,6 +208,9 @@
       if (!state?.rateLimit) throw new Error('The Instagram check stopped. Use Retry Checking to try again.');
       showRateStatus(state);
     },
+    async resetSearchField() {
+      return (await send({ type: 'F4F_RESET_SEARCH_FIELD' }))?.ok === true;
+    },
     async progress(list, collected, expected) {
       const state = await send({ type: 'F4F_PROGRESS', list, collected, expected }).catch(() => null);
       if (rateStatus && state?.reason !== 'rate_limited') showRateStatus(state);

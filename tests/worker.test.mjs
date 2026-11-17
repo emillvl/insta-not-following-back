@@ -141,6 +141,23 @@ test('in-flight responses share one decision and keep the latest header even aft
   assert.equal((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
 });
 
+test('a search replay can reset the focused field only in the running scan document after cooldown', async () => {
+  const h = scanning();
+  const injections = [];
+  h.chrome.scripting.executeScript = async options => { injections.push(options); return [{ result: true }]; };
+  const resetField = sender => h.dispatch({ type: 'F4F_RESET_SEARCH_FIELD', runId: 'scan' }, sender);
+  h.response({ ...retry('2'), url: 'https://www.instagram.com/api/v1/friendships/123/following/?query=account' });
+  await h.settle();
+  assert.equal((await resetField(h.page(2))).ignored, true);
+  h.advance(2100);
+  assert.equal((await requestRetry(h)).retryUsed, true);
+  assert.equal((await resetField({ ...h.page(2), documentId: 'stale' })).ignored, true);
+  assert.equal(injections.length, 0);
+  assert.equal((await resetField(h.page(2))).ok, true);
+  assert.equal(injections[0].world, 'MAIN');
+  assert.deepEqual(structuredClone(injections[0].target), { tabId: 2, documentIds: ['document-2'] });
+});
+
 test('a missing, malformed or expired Retry-After stops immediately and allows a manual attempt', async () => {
   for (const value of [undefined, '', '0', '1.5', '-10', '12/31/2099', 'Tue, 31 Feb 2099 00:00:00 GMT',
     'Sunday, 06-Nov-94 08:49:37 GMT', 'tomorrow']) {

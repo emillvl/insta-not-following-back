@@ -87,12 +87,14 @@ specific Followers row verifies an outgoing follow. Follow, Follow Back, and
 Requested rule out a current outgoing follow. A Follows you label on a Following
 row verifies an incoming follow. If a
 shortfall remains, the collector searches eligible usernames from the opposite
-list and skips rows marked deactivated. It hides the search dialog and makes it
-inert while verifying. A search result must match the username and expose an
-affirmative relationship for the list being checked. The collector can verify
-missing followers in the already open list.
-It limits a scan to four exact search inputs. The fixtures need up to three
-distinct handles and the fourth input leaves room for one replay. It spaces
+list and skips rows marked deactivated. It hides the list dialog visually and
+focuses the native search field. If the field remounts while a result loads,
+the collector waits for the exact query to reappear. A search result must match
+the username and expose an affirmative relationship for the list being checked.
+The collector can verify missing followers in the already open list.
+
+A scan allows four exact search inputs, including any replay. The collector
+tries candidates while enough inputs remain to cover both shortfalls. It spaces
 inputs at least 1,500 ms apart and waits for visible search loaders before
 sending the next name. Both totals are checked again before comparison.
 

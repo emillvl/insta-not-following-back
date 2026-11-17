@@ -17,7 +17,7 @@ const duplicates = {
   following: [...distinct, ...distinct.slice(0, 3)], followingTotal: 114,
   followers: ['fan', 'inactive_account', ...names.slice(0, -1)], followersTotal: 114,
   labels: { fan: 'Follow Back', inactive_account: 'Deactivated account', [omitted[0]]: 'Following' },
-  searchable: true, expected: names.slice(-1)
+  searchable: true, searchMembers: names, expected: names.slice(-1)
 };
 const paginated = { ...healthy, extra: ['later'], expected: ['missing', 'later'] };
 const pathPattern = /^\/api\/v1\/friendships\/123\/(following|followers)\/$/;
@@ -64,10 +64,19 @@ function pageScript(config) {
       if (config.searchable && list === 'following') {
         const input = document.createElement('input');
         input.type = 'search';
+        const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        let lastValue = input.value;
+        Object.defineProperty(input, 'value', {
+          get() { return nativeValue.get.call(this); },
+          set(value) { lastValue = String(value); nativeValue.set.call(this, value); }
+        });
         input.oninput = async () => {
           const name = input.value;
+          const focused = document.activeElement === input;
           metrics.searches.push(name);
-          metrics.searchPresentation.push([getComputedStyle(dialog).opacity, dialog.inert]);
+          metrics.searchPresentation.push([getComputedStyle(dialog).opacity, dialog.inert, focused]);
+          if (!focused || name === lastValue) return;
+          lastValue = name;
           area.replaceChildren();
           if (config.replaceOnSearch) {
             const replacement = dialog.cloneNode(true);
@@ -75,7 +84,7 @@ function pageScript(config) {
             dialog.replaceWith(replacement);
           }
           if (await request('search', `query=${encodeURIComponent(name)}`) && dialog.isConnected) {
-            area.append(row(name, config.labels[name] || 'Following'));
+            area.append(row(name, config.searchMembers.includes(name) ? 'Following' : 'Follow'));
           }
         };
         dialog.append(input);
@@ -246,7 +255,7 @@ async function assertBanner(page, pattern) {
 }
 async function assertClean(page) {
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]') &&
-    !document.documentElement.hasAttribute('data-f4f-verifying'));
+    !document.querySelector('[data-f4f-verifying]'));
 }
 function assertResult(state, config) {
   assert.equal(state.status, 'completed', state.message);
@@ -283,10 +292,24 @@ try {
       assert.deepEqual(state.validation.following, { expected: 114, collected: 114 });
       assert.deepEqual(categories(requests), [...duplicateOrder, ...repeated('following.search', 2)]);
       assert.deepEqual(await page.evaluate(() => metrics.searches), omitted.slice(1));
-      assert.deepEqual(await page.evaluate(() => metrics.searchPresentation), [['0', true], ['0', true]]);
+      assert.deepEqual(await page.evaluate(() => metrics.searchPresentation), repeated(['0', false, true], 2));
       await assertClean(page);
       return state;
     } });
+    const extras = ['another_fan', 'candidate_one', 'candidate_two'];
+    const moreCandidates = { ...duplicates, followers: [extras[0], ...duplicates.followers, ...extras.slice(1)],
+      followersTotal: duplicates.followersTotal + extras.length };
+    await scenario('a two-account shortfall can be resolved with five candidates', moreCandidates, {
+      verify: async ({ page, until, previous, requests }) => {
+        const state = await until(state => finished(state, previous));
+        assertResult(state, moreCandidates);
+        assert.deepEqual(state.validation.following, { expected: 114, collected: 114 });
+        assert.deepEqual(await page.evaluate(() => metrics.searches), [extras[0], ...omitted.slice(1)]);
+        assert.deepEqual(categories(requests), [...duplicateOrder, ...repeated('following.search', 3)]);
+        await assertClean(page);
+        return state;
+      }
+    });
     await scenario('persistent pagination 429 stops until a manual retry', { ...paginated,
       reject: category => category === 'following.page' && {}
     }, { scale: 24, verify: async ({ page, until, previous, requests, scale }) => {
@@ -382,7 +405,7 @@ try {
       assert.equal(state.results, undefined);
       await assertClean(page);
       assert.deepEqual(categories(requests), [...duplicateOrder, 'following.search']);
-      assert.deepEqual(await page.evaluate(() => metrics.searchPresentation), [['0', true]]);
+      assert.deepEqual(await page.evaluate(() => metrics.searchPresentation), [['0', false, true]]);
       assert.equal(await page.locator('[data-f4f-results]').count(), 0);
       return state;
     } });
@@ -397,7 +420,7 @@ try {
       assert.deepEqual(categories(requests), [...duplicateOrder, ...repeated('following.search', 3)]);
       assert.ok(realStart + (requests[4].at - realStart) * scale >= paused.retryAt);
       assert.deepEqual(await page.evaluate(() => metrics.searches), [omitted[1], ...omitted.slice(1)]);
-      assert.deepEqual(await page.evaluate(() => metrics.searchPresentation), repeated(['0', true], 3));
+      assert.deepEqual(await page.evaluate(() => metrics.searchPresentation), repeated(['0', false, true], 3));
       return state;
     } });
   }
