@@ -1,119 +1,107 @@
-# F4F Checker
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="extension/icons/logo-light-128.png">
+    <img src="extension/icons/logo-512.png" width="88" height="88" alt="">
+  </picture>
+  <h1>F4F Checker</h1>
+  <p>See who doesn't follow you back on Instagram.</p>
+  <p>By Emil Valiyev</p>
+  <p>
+    <a href="https://microsoftedge.microsoft.com/addons/detail/f4f-checker/nkkjgaclfdeidnccmjiemcjdmeooobfj"><strong>Install for Edge</strong></a>
+    &nbsp;·&nbsp; <a href="#install-in-chrome">Set up in Chrome</a>
+    &nbsp;·&nbsp; <a href="#run-a-check">Run a check</a>
+  </p>
+  <img src="docs/images/popup-light.png" width="250" alt="Example F4F Checker results in Light mode">
+  <img src="docs/images/popup-dark.png" width="250" alt="The same example results in Dark mode">
+</div>
 
-<img src="extension/icons/logo-512.png" width="96" height="96" alt="F4F Checker logo">
+## Install in Chrome
 
-By Emil Valiyev
+Download or clone this repository. The `extension` folder is ready to load.
 
-A browser extension that checks which Instagram accounts you follow don't
-follow you back. It opens your own profile, reads the following and follower
-lists, and shows the results on Instagram. A signed-in Instagram session is
-required.
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. Choose **Load unpacked** and select the `extension` folder.
 
-The original browser-console script is on
-[DevConsole-Version](https://github.com/emillvl/insta-not-following-back/tree/DevConsole-Version).
+After updating an unpacked copy, select **Reload** on its extension card and
+refresh your Instagram tabs.
 
-## Install and use
+## Run a check
 
-In Microsoft Edge, install F4F Checker from
-[Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/f4f-checker/nkkjgaclfdeidnccmjiemcjdmeooobfj).
-For Google Chrome, download or clone this repository.
+1. Open F4F Checker from the browser's Extensions menu and select **Start Checking**.
+2. Sign in on Instagram if asked. F4F Checker opens your profile and reads your
+   Following and Followers lists. Keep that tab active until the check finishes.
+3. Read the results in the Instagram tab. You can also reopen the extension and
+   select **View Results**, or start over with **Check Again**.
 
-1. Open `chrome://extensions` and enable **Developer mode**.
-2. Choose **Load unpacked** and select the repository's `extension` folder.
+You can close the popup during a check. Pick **Light**, **Dark**, or **System**
+under **Appearance**. System follows your computer's theme, and the extension
+remembers your choice between sessions.
 
-Open F4F Checker from the browser's **Extensions** menu and select
-**Start Checking**. The extension opens Instagram or reuses an open Instagram
-tab. Keep that tab open and active while the extension opens your profile and
-checks both lists.
+### When the check pauses
 
-Read the results on Instagram or reopen the popup and select **View Results**.
-Closing the popup does not stop a check. **Check Again** starts another scan
-after a completed check. **Appearance** offers **System**, **Light**, and
-**Dark**. System follows your computer's preferred mode. The choice is saved
-across browser sessions.
+| Message | What to do |
+| --- | --- |
+| 🔑 Login required | Sign in on Instagram. If the check is still waiting, choose **Continue After Login**. |
+| Getting ready | Open your own profile from Instagram's menu so F4F Checker can find both lists. |
+| ⚠️ Incomplete scan | Compare the count in the message with the one on your profile. Give Instagram time to load the list, then choose **Retry Checking**. |
+| ⏳ Instagram rate limit | The notice shows when Instagram returned HTTP 429 and any retry time it provided. **Retry Checking** becomes available after that time. |
 
-After updating an unpacked install, select **Reload** on the extension card and
-refresh any open Instagram tabs before starting.
+## How it works
 
-### Troubleshooting
+F4F Checker uses the same Following and Followers dialogs you open on your own
+Instagram profile. It reads account links as rows load or are reused during
+scrolling. If a list comes up short, it checks relationship labels from the other
+list first. It can then search for exact usernames out of view in the same tab.
+A check allows up to four exact search inputs, including any retry, and skips
+searches for accounts marked deactivated. Deactivated accounts count when their
+profile links appear in the list.
 
-- **Login required.** Sign in directly on Instagram. If the popup still shows
-  **Login required** afterward, select **Continue After Login**.
-- **Getting ready.** If the extension is waiting for your profile, open your
-  own Profile from Instagram's menu so it can find the two list controls.
-- **Incomplete scan.** The message shows how many accounts the checker found
-  and your profile total. Give Instagram time to load the list before retrying.
-- **Instagram rate limit.** The notice shows when Instagram returned HTTP 429
-  and any retry time it supplied. If the checker stops, use **Retry Checking**
-  when you are ready to try again. The button becomes available when any
-  Instagram-supplied wait ends.
+Results appear once both lists settle and reach at least the totals on your profile.
+The result shows who doesn't follow you back, with links to their profiles and
+totals for both lists. A result of zero means the comparison finished and found
+no missing follow-backs.
 
-## Checking
+<details>
+<summary>Timing, counts, and retries</summary>
 
-The checker uses Instagram's native controls and the original script's pacing:
-three seconds after opening a list, two seconds before collection, 1.5 seconds
-per scroll pass, and two seconds after closing. It waits another two seconds
-between lists. A complete list needs seven stable passes at the end. A list
-that comes up short gets a longer wait.
+The checker waits three seconds after opening each list and two more before
+collection. Scroll passes are 1.5 seconds apart. It waits two seconds after
+closing a list and another two before opening the second list. It needs seven
+stable passes at the end of a complete list. A short list can get a rewind to
+load another page, and a visible loading indicator gives Instagram more time.
+Both lists share a 20-minute limit.
 
-The checker reads profile links in the account list, including full Instagram
-URLs and links that label themselves with the account name. It follows the
-container that holds those rows as Instagram adds, removes, or reuses them.
-Completion requires settled lists with at least the displayed totals.
-Deactivated accounts remain included when their profile links are present.
+If Instagram returns HTTP 429 on a list request, the check pauses until the
+`Retry-After` time. It can retry once if the wait fits within the check. A second
+429 or a response without a usable future retry time stops the check.
 
-The checker takes overlapping steps through the loaded rows. If a list settles
-short of its total, it can rewind once to retrigger pagination. An unfinished
-list with a visible loader gets more time. The collection phase for both lists
-has a single 20-minute limit.
+A list dialog that disappears gets three seconds to return. The checker allows
+four replacements in a row without new accounts. A rounded count such as `10K`
+requires an exact number in the tooltip or accessible label. Changed totals,
+unavailable counts, loading failures, or an interrupted check can stop results
+from appearing. Instagram can hide accounts or change a list during a check.
+Switching tabs can delay the scan, and live layouts can differ from the fixtures.
 
-The scan stays in its Instagram tab. If a list still comes up short, the
-checker uses relationship labels from the lists first. Any additional exact
-searches run out of view, skip accounts marked deactivated, and stop once the
-total is verified. A check sends at most four exact search inputs. Results
-require both verified totals.
+</details>
 
-The first HTTP 429 on a recognized list request stops the check if Instagram
-supplies no usable future `Retry-After`. When Instagram supplies a retry
-time, the checker pauses list activity until that time and allows one automatic
-retry across the whole check if the wait fits. Another HTTP 429 after that
-retry stops the check.
+## Privacy
 
-A replaced dialog can reconnect within three seconds of a paced check. Four
-consecutive replacements without new accounts are allowed.
-Missing exact counts, changed profile totals, failed loading, or interruptions
-stop the scan. Rounded labels such as `10K` require an exact title or
-accessibility value.
+You sign in on Instagram. Your login credentials stay with Instagram. F4F Checker
+reads the lists in your browser and has no server or analytics. The extension
+uses browser storage, runs its scripts on Instagram, and reads rate-limit
+responses from the tab doing the check. Instagram handles the regular clicks,
+scrolls, and searches used to load your lists.
 
-The results keep the original Turkish labels, account order, totals, and profile
-links. An empty result is a completed check with zero accounts.
+Results stay in browser session storage. You can reopen them after closing the
+popup, result box, or Instagram tab. A browser restart or extension reload
+clears them. If the result is too large to save, it stays open in the Instagram
+tab. Appearance is saved separately. [Privacy policy](PRIVACY.md)
 
-## Storage and privacy
+## Develop and test
 
-The extension has no server or analytics and does not read or store your login
-credentials. Instagram receives the normal page interactions used to load its
-lists. The extension uses storage, script injection, and read-only observation
-of Instagram's rate-limit responses in the scanning tab.
-
-Results use local session storage. They survive closing the popup and can be
-reopened after closing the result box or Instagram tab. Browser restart or
-extension reload clears them. Appearance uses local storage and persists.
-If a result exceeds storage capacity, the on-page list remains available.
-
-## Logo
-
-The popup, toolbar, and extension listing use the same f4f↗ mark.
-
-- [1024px PNG](extension/icons/logo-1024.png)
-- [512px PNG](extension/icons/logo-512.png)
-- [SVG source](extension/icons/logo.svg)
-
-The PNG files have transparent rounded corners. The extension includes 16, 32,
-48, and 128px icons and a light-mode popup variant.
-
-## Development
-
-Node.js is needed only for development. The checked-in extension is ready to load.
+The original browser-console script is in the
+[DevConsole-Version](https://github.com/emillvl/insta-not-following-back/tree/DevConsole-Version)
+branch. For development, install Node.js and run:
 
 ```sh
 npm run build
@@ -121,12 +109,14 @@ npm test
 npm run check
 ```
 
-The build verifies that `f4fchecker.js` is unchanged and generates both runners.
-The production runner uses the safer collector while keeping the original
-comparison and result construction. The reference runner contains the full
-original script.
+The build checks the original `f4fchecker.js` and generates two runners. The
+reference runner contains the full original script. The extension's runner
+uses the list collector and keeps the original comparison and result data.
 
-Browser checks and logo exports use Playwright and default to Microsoft Edge.
+<details>
+<summary>Browser checks and logo exports</summary>
+
+Browser checks and logo exports use Playwright with Microsoft Edge by default.
 
 ```sh
 npm run test:browser
@@ -137,22 +127,20 @@ npm run test:timing
 npm run build:icons
 ```
 
-Set `F4F_PLAYWRIGHT_PATH` if Playwright is installed elsewhere. Set
-`F4F_BROWSER_CHANNEL=chrome` to run the browser tests in Google Chrome.
-The `test:extension` suite also needs OpenSSL. On Windows it uses the
-`mingw64/bin/openssl.exe` included with Git for Windows. Set
-`F4F_OPENSSL_PATH` to use another copy.
-Tests use local fixtures and temporary browser profiles. Screenshots are saved
-in the ignored `artifacts` folder.
+Set `F4F_PLAYWRIGHT_PATH` if Playwright is installed elsewhere, or
+`F4F_BROWSER_CHANNEL=chrome` to use Google Chrome. `test:extension` also needs
+OpenSSL. On Windows it defaults to `mingw64/bin/openssl.exe` from Git for Windows.
+Set `F4F_OPENSSL_PATH` to use another copy.
 
-See [Algorithm](docs/ALGORITHM.md), [Interface](docs/DESIGN.md), and
-[Verification](docs/VERIFICATION.md) for implementation and test details.
+Tests use local fixtures and temporary browser profiles. Screenshots go in the
+ignored `artifacts` folder.
 
-Instagram can change its markup or hide accounts. Counts and settling cannot
-prove a snapshot of memberships that change during checking. Switching tabs can
-delay execution. Live Instagram layouts and languages can differ from the test
-fixtures.
+The popup, toolbar, and listing use the f4f↗ logo. The PNGs have transparent
+rounded corners. The extension includes 16, 32, 48, and 128px icons and a Light
+variant for the popup. [1024px PNG](extension/icons/logo-1024.png) ·
+[512px PNG](extension/icons/logo-512.png) · [SVG source](extension/icons/logo.svg)
 
-## License
+</details>
 
-[Apache License 2.0](LICENSE).
+[Algorithm](docs/ALGORITHM.md) · [Interface](docs/DESIGN.md) ·
+[Verification](docs/VERIFICATION.md) · [Apache License 2.0](LICENSE)

@@ -32,21 +32,33 @@
     F4FTheme.attach(host);
     root.replaceChildren();
     const style = document.createElement('style');
-    style.textContent = F4FTheme.css(':host') + ':host{font:13px/1.5 system-ui,sans-serif;color:var(--f4f-text)}.banner{padding:12px 16px;background:var(--f4f-bg);border:1px solid var(--f4f-border);border-top:3px solid #C13584;border-radius:14px;box-shadow:0 6px 28px var(--f4f-banner-shadow);display:flex;gap:12px}.ring{flex:none;width:18px;height:18px;margin-top:3px;border:2px solid var(--f4f-ring);border-top-color:var(--f4f-accent);border-radius:50%;animation:spin 1s linear infinite}strong{display:block;font-size:13px;color:var(--f4f-accent);margin-bottom:3px}p{margin:0}.error strong{color:var(--f4f-error)}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.ring{animation:none}}';
+    style.textContent = F4FTheme.css(':host') + `
+      :host{font:13px/1.5 system-ui,sans-serif;color:var(--f4f-text)}
+      .banner{padding:12px 16px;background:var(--f4f-bg);border:1px solid var(--f4f-border);border-top:3px solid #C13584;border-radius:14px;box-shadow:0 6px 28px var(--f4f-banner-shadow);display:flex;gap:12px}
+      .signal{display:grid;place-items:center;flex:none;width:24px;height:24px;border-radius:8px;background:var(--f4f-tint);color:var(--f4f-accent);font-weight:700}
+      .ring{box-sizing:border-box;border:2px solid var(--f4f-ring);border-top-color:var(--f4f-accent);border-radius:50%;animation:spin 1s linear infinite}
+      strong{display:block;font-size:13px;color:var(--f4f-accent);margin-bottom:3px}
+      p{margin:0;white-space:pre-line;overflow-wrap:anywhere}
+      .error strong{color:var(--f4f-error)}
+      .error .signal{background:var(--f4f-error-bg)}
+      @keyframes spin{to{transform:rotate(360deg)}}
+      @media(prefers-reduced-motion:reduce){.ring{animation:none}}`;
     const panel = document.createElement('div');
     panel.className = `banner ${kind}`;
     panel.setAttribute('role', kind === 'error' ? 'alert' : 'status');
     const indicator = document.createElement('span');
-    indicator.className = kind === 'running' ? 'ring' : '';
-    indicator.textContent = kind === 'success' ? '✓' : kind === 'error' ? '!' : '';
+    const onHold = reason === 'rate_limited' && kind === 'running';
+    indicator.className = kind === 'running' && !onHold ? 'signal ring' : 'signal';
+    indicator.setAttribute('aria-hidden', 'true');
+    indicator.textContent = kind === 'success' ? '✓' : onHold ? '⏳' : kind === 'error' ? '⚠️' : '';
     const copy = document.createElement('div');
     const title = document.createElement('strong');
     const incomplete = reason === 'incomplete_scan' || reason === 'unverified_count';
-    const waiting = reason === 'rate_limited' || reason === 'waiting_for_instagram';
-    title.textContent = kind === 'running' ? (waiting ? 'Waiting for Instagram' : 'Checking your Instagram lists') :
-      kind === 'success' ? '✓ Checking Complete' : incomplete ? 'Incomplete scan' : 'Checking stopped';
+    title.textContent = reason === 'rate_limited' ? 'Instagram rate limit' :
+      reason === 'waiting_for_instagram' ? 'Waiting for Instagram' : incomplete ? 'Incomplete scan' :
+      kind === 'success' ? 'Check complete' : kind === 'running' ? 'Checking your lists' : 'Checking stopped';
     const text = document.createElement('p');
-    text.textContent = message || 'F4F Checker is currently running. Please keep this Instagram tab open and active until the checking process is complete. Switching tabs may interrupt or delay the operation.';
+    text.textContent = message || 'Keep this Instagram tab active until the check finishes.';
     copy.append(title, text);
     panel.append(indicator, copy);
     root.append(style, panel);
@@ -63,9 +75,19 @@
     const title = box.querySelector('h3');
     title.style.cssText = 'margin:0 32px 8px 0;font-size:20px;line-height:1.3;color:var(--f4f-text);';
     const summary = box.querySelector('div');
-    summary.style.cssText = 'margin-bottom:18px;color:var(--f4f-muted);font-size:13px;';
+    const result = F4FResultCopy({ heading: title.textContent, summary: summary.textContent.trim() });
+    title.textContent = result.heading;
+    summary.textContent = result.summary;
+    summary.style.cssText = 'margin:12px 0 14px;padding:9px 12px;background:var(--f4f-surface);border:1px solid var(--f4f-border);border-radius:10px;color:var(--f4f-muted);font-size:13px;font-variant-numeric:tabular-nums;';
     const list = box.querySelector('ul');
     list.style.cssText = 'list-style:none;padding:0;margin:0;color:var(--f4f-text);';
+    if (!list.children.length && !box.querySelector('[data-f4f-empty]')) {
+      const empty = document.createElement('p');
+      empty.setAttribute('data-f4f-empty', '');
+      empty.textContent = 'No missing follow-backs.';
+      empty.style.cssText = 'margin:14px 0 0;color:var(--f4f-muted);';
+      list.before(empty);
+    }
     for (const item of list.children) {
       item.style.cssText = 'margin:0;border-top:1px solid var(--f4f-border);';
       item.firstElementChild.style.cssText = 'display:block;padding:10px 4px;color:var(--f4f-accent);text-decoration:none;overflow-wrap:anywhere;';
@@ -130,7 +152,7 @@
           Boolean(document.querySelector('input[type="password"]'));
         if (login) {
           waitStarted = Date.now();
-          await waitStatus('login_required', 'Log in to Instagram in this tab. Checking will continue after login.');
+          await waitStatus('login_required', 'Sign in on Instagram. The check will resume there automatically.');
         } else {
           const ownPage = F4FSelectors.currentOwnProfile(document);
           const profile = F4FSelectors.profileControl(document);
@@ -143,16 +165,16 @@
           const onOwnProfile = name && F4FSelectors.usernameFromHref(location.href) === name;
           if (!onOwnProfile && profile && clickedProfileFrom !== location.pathname) {
             clickedProfileFrom = location.pathname;
-            await waitStatus('profile_navigation', 'Opening Instagram’s Profile section…');
+            await waitStatus('profile_navigation', 'Opening your profile on Instagram…');
             if (runId === thisRun && !claimed) profile.control.click();
           } else {
             await waitStatus(onOwnProfile ? 'page_readiness' : 'waiting_profile', onOwnProfile ?
-              'Waiting for your follower and following links…' : 'Waiting for Instagram’s Profile control…');
+              'Waiting for your Following and Followers lists to appear…' : 'Open your profile on Instagram to continue.');
           }
           if (Date.now() - waitStarted > 60000) {
             await send({ type: 'F4F_FAILED', reason: 'readiness_error',
-              message: onOwnProfile ? 'The follower and following controls could not be identified on this profile. Reload Instagram and retry.' :
-                'Instagram’s Profile control is unavailable. Open your Profile section in Instagram, then retry checking.' });
+              message: onOwnProfile ? "Couldn't find your Following and Followers lists. Refresh Instagram, then choose Retry Checking." :
+                'Open your profile on Instagram, then choose Retry Checking in F4F Checker.' });
             return;
           }
         }
@@ -227,7 +249,7 @@
         return;
       }
       rateStatus = null;
-      warning('success', 'Your results are ready. Open F4F Checker to view them again.');
+      warning('success', 'Your results are ready here on Instagram. You can reopen them from F4F Checker.');
     },
     async fail(error) {
       running = false;

@@ -7,7 +7,8 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.F4F_PLAYWRIGHT_PATH || 'playwright');
 const source = readFileSync('f4fchecker.js', 'utf8');
 const file = name => readFileSync(`extension/${name}`, 'utf8');
-const browser = await chromium.launch({ channel: process.env.F4F_BROWSER_CHANNEL || 'msedge', headless: true });
+const browser = await chromium.launch({ channel: process.env.F4F_BROWSER_CHANNEL || 'msedge', headless: true,
+  args: ['--no-proxy-server', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] });
 mkdirSync('artifacts', { recursive: true });
 let checks = 0;
 const native = { following: [['mutual', 'missing', 'mutual', 'explore', 'reels'], ['mutual', 'later', 'missing']],
@@ -56,6 +57,7 @@ async function install(page) {
   await page.addScriptTag({ content: file('theme.js') });
   await page.addScriptTag({ content: file('localization.js') });
   await page.addScriptTag({ content: file('list-controls.js') });
+  await page.addScriptTag({ content: file('result-copy.js') });
   await page.addScriptTag({ content: file('content.js') });
 }
 async function snapshot(page) {
@@ -92,7 +94,11 @@ try {
       const page = await pageFor(data, label);
       await adapted(page);
       const actual = await snapshot(page);
-      assert.deepEqual({ ...actual, timings: actual.timings.slice(0, expected.timings.length) }, expected);
+      const [following, followers] = expected.summary.match(/\d+/g);
+      assert.deepEqual({ ...actual, timings: actual.timings.slice(0, expected.timings.length) }, {
+        ...expected, heading: `Not following you back (${expected.accounts.length})`,
+        summary: `Following ${following} · Followers ${followers}`
+      });
       assert.equal(await page.evaluate(() => __messages.filter(m => m.type === 'F4F_FINISHED').length), 1);
       await page.locator('#closeF4FBox').click();
       assert.equal(await page.locator('[data-f4f-results]').count(), 0);
@@ -102,7 +108,7 @@ try {
       await baseline.close(); await page.close(); checks++;
     }
   }
-  console.log('PASS: six differential full-script fixtures; outputs, ordering, filtering, clicks, delays and close/reopen actions match.');
+  console.log('PASS: six comparisons retain the original accounts, order, counts and timing with English result labels.');
   for (const label of ['Cerrar', 'Fermer', 'Schließen', 'Chiudi', 'Fechar', 'Закрыть', 'إغلاق', '閉じる', '닫기']) {
     const page = await pageFor(native, label);
     await adapted(page);
@@ -254,7 +260,7 @@ try {
 
   const server = createServer((req, res) => {
     const name = req.url.split('?')[0].slice(1);
-    if (!['popup.html', 'popup.css', 'theme.js', 'popup.js', 'icons/logo-light-128.png', 'icons/icon-128.png'].includes(name)) { res.writeHead(404); res.end(); return; }
+    if (!['popup.html', 'popup.css', 'theme.js', 'result-copy.js', 'popup.js', 'icons/logo-light-128.png', 'icons/icon-128.png'].includes(name)) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', name.endsWith('.png') ? 'image/png' : name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'application/javascript' : 'text/html');
     res.end(readFileSync(`extension/${name}`));
   });
@@ -276,12 +282,13 @@ try {
     await visual.goto(`http://127.0.0.1:${server.address().port}/popup.html`);
     const states = [
       { status: 'idle', message: 'Ready' },
-      { status: 'running', message: 'Checking following, then followers…' },
-      { status: 'completed', message: 'Checking Complete', results: { heading: 'Seni Takip Etmeyenler (2)', summary: 'Takip Ettiğin: 4 | Takipçi: 2', accounts: [] } },
+      { status: 'running', message: 'Following · 112 of 114 found.' },
+      { status: 'completed', message: 'Your results are ready on Instagram.', results: {
+        heading: 'Seni Takip Etmeyenler (2)', summary: 'Takip Ettiğin: 114 | Takipçi: 117', accounts: [] } },
       { status: 'error', message: 'Instagram was reloaded. Please retry.' },
-      { status: 'error', reason: 'incomplete_scan', message: 'Incomplete followers scan: collected 250 of 10000. Retry checking; no non-followers were confirmed.' },
-      { status: 'waiting', reason: 'waiting_profile', message: 'Waiting for Instagram’s Profile control…' },
-      { status: 'waiting', reason: 'login_required', message: 'Log in to Instagram in this tab. Checking will continue after login.' }
+      { status: 'error', reason: 'incomplete_scan', message: 'F4F Checker verified 112 of 114 accounts you follow. No comparison was made.' },
+      { status: 'waiting', reason: 'waiting_profile', message: 'Open your profile on Instagram to continue.' },
+      { status: 'waiting', reason: 'login_required', message: 'Sign in on Instagram. The check will resume there automatically.' }
     ];
     for (const mode of ['light', 'dark']) for (const state of states) {
       await visual.locator('#appearance').selectOption(mode);
@@ -289,8 +296,13 @@ try {
       await visual.evaluate(state => __render(state), state);
       if (state.reason === 'incomplete_scan') {
         assert.equal(await visual.locator('#title').textContent(), 'Incomplete scan');
+        assert.equal(await visual.locator('#symbol').textContent(), '⚠️');
         assert.equal(await visual.locator('#view').isVisible(), false);
         assert.equal(await visual.locator('#start').textContent(), 'Retry Checking');
+      }
+      if (state.status === 'completed') {
+        assert.equal(await visual.locator('#result-heading').textContent(), 'Not following you back (2)');
+        assert.equal(await visual.locator('#result-totals').textContent(), 'Following 114 · Followers 117');
       }
       assert.ok(await visual.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       assert.equal(await visual.locator('.author').textContent(), 'By Emil Valiyev');
@@ -303,7 +315,7 @@ try {
         const box = await button.boundingBox();
         assert.ok(box.x >= 0 && box.x + box.width <= 360 && box.height >= 44);
       }
-      await visual.screenshot({ path: `artifacts/popup-${mode === 'dark' ? 'dark-' : ''}${state.reason || state.status}.png`, fullPage: true });
+      await visual.locator('body').screenshot({ path: `artifacts/popup-${mode === 'dark' ? 'dark-' : ''}${state.reason || state.status}.png` });
       checks++;
     }
     assert.equal(await visual.locator('input, form').count(), 0);
@@ -334,10 +346,11 @@ try {
       message: 'Instagram returned HTTP 429.' }));
     await visual.clock.fastForward(3600000);
     assert.equal(await visual.locator('#title').textContent(), 'Instagram rate limit');
+    assert.equal(await visual.locator('#symbol').textContent(), '⏳');
     assert.equal(await visual.locator('#start').isDisabled(), true);
     await visual.clock.fastForward(3600000);
     assert.equal(await visual.locator('#title').textContent(), 'Checking stopped');
-    assert.match(await visual.locator('#message').textContent(), /cooldown ended/);
+    assert.equal(await visual.locator('#message').textContent(), 'You can retry now.');
     assert.equal(await visual.locator('#start').isEnabled(), true);
     checks++;
     assert.equal(await visual.locator('#appearance').inputValue(), 'system');

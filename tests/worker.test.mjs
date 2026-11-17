@@ -107,7 +107,7 @@ test('only recognized top-frame list requests from the active document affect th
   assert.equal(h.operation.reason, 'rate_limited');
   assert.deepEqual(h.operation.rateLimit, { receivedAt: h.now, list: 'following',
     category: 'pagination', attempt: 0, noRetryTime: false });
-  assert.match(h.operation.message, /HTTP 429 while loading Following.+Instagram supplied the retry time/);
+  assert.match(h.operation.message, /HTTP 429 while loading Following at .+\nNext attempt after /);
   assert.equal((await requestRetry(h)).retryUsed, undefined);
 });
 
@@ -167,7 +167,7 @@ test('a missing, malformed or expired Retry-After stops immediately and allows a
     assert.equal(h.operation.status, 'error', value);
     assert.equal(h.operation.reason, 'rate_limited');
     assert.equal(h.operation.retryAt, undefined);
-    assert.match(h.operation.message, /supplied no usable retry time.+Retry Checking/);
+    assert.match(h.operation.message, /supplied no usable retry time\.\nChoose Retry Checking/);
     assert.equal((await requestRetry(h)).status, 'error');
     h.probe = { runId: 'scan', running: false };
     assert.notEqual((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
@@ -184,7 +184,7 @@ test('an unknown retry time stops an overlapping attempt and preserves an advert
   await h.settle();
   assert.equal(h.operation.status, 'error');
   assert.equal(h.operation.retryAt, h.now + 60000);
-  assert.match(h.operation.message, /no usable retry time.+Retry after/);
+  assert.match(h.operation.message, /no usable retry time\.\nRetry after/);
   h.advance(60001);
   assert.equal((await requestRetry(h)).status, 'error');
 });
@@ -194,7 +194,7 @@ test('a long wait stops the check and expiry updates a stopped scan without a ne
   h.response(retry('7200'));
   await h.settle();
   assert.equal(h.operation.status, 'error');
-  assert.match(h.operation.message, /exceeds the time left.+Retry after/);
+  assert.match(h.operation.message, /exceeds the time left in this check\.\nRetry after/);
   h.advance(3600000);
   assert.equal((await h.dispatch({ type: 'F4F_STATUS' })).reason, 'rate_limited');
   assert.equal((await h.dispatch({ type: 'F4F_START' })).runId, 'scan');
@@ -401,7 +401,7 @@ test('actual collection progress changes the message without marking completion'
   assert.equal(h.operation.status, 'running');
   assert.match(h.operation.message, /250 of 10000/);
   await h.dispatch({ type: 'F4F_PROGRESS', runId: 'progress', list: 'followers', collected: 10001, expected: 10000 }, h.page(13));
-  assert.equal(h.operation.message, 'Checking followers… 10001 found. Your profile shows 10000.');
+  assert.equal(h.operation.message, 'Followers · 10001 found. Your profile shows 10000.');
   assert.equal(h.operation.status, 'running');
 });
 

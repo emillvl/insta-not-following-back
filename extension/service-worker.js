@@ -58,22 +58,22 @@ function cooldownMessage(operation) {
   const list = rateLimit.list === 'following' ? 'Following' : 'Followers';
   const message = [`Instagram returned HTTP 429 while loading ${list} at ${new Date(rateLimit.receivedAt).toLocaleString()}.`];
   if (rateLimit.noRetryTime) message.push('Instagram supplied no usable retry time.');
-  if (rateLimit.attempt) message.push('This check used its automatic retry.');
+  if (rateLimit.attempt) message.push('The automatic retry also hit a limit.');
   else if (retryAt >= operation.deadline) message.push('The retry time exceeds the time left in this check.');
   if (retryAt > Date.now()) {
     const action = status === 'running' ? 'Next attempt after' : 'Retry after';
-    message.push(`${action} ${new Date(retryAt).toLocaleString()}. Instagram supplied the retry time.`);
+    message.push(`${action} ${new Date(retryAt).toLocaleString()}.`);
   } else if (retryAt) message.push('Instagram’s retry time has passed.');
-  if (status === 'error') message.push('Use Retry Checking in F4F Checker for a new attempt.');
-  return message.join(' ');
+  if (status === 'error' && !(retryAt > Date.now())) message.push('Choose Retry Checking in F4F Checker to try again.');
+  return message.join('\n');
 }
-const listLabel = list => list === 'following' ? 'accounts you follow' : 'followers';
+const listLabel = list => list === 'following' ? 'Following' : 'Followers';
 const countDetail = ({ collected, expected }) => collected > expected ?
   `${collected} found. Your profile shows ${expected}.` : `${collected} of ${expected} found.`;
 function waitingForList(progress) {
   return Number.isSafeInteger(progress?.expected) ?
-    `Waiting for Instagram to load ${listLabel(progress.list)}. ${countDetail(progress)}` :
-    'The cooldown ended. Waiting for Instagram to load the list.';
+    `The wait is over.\n${listLabel(progress.list)} · ${countDetail(progress)}` :
+    'The wait is over. Instagram is loading the list.';
 }
 async function refreshCooldown(operation) {
   if (operation.reason !== 'rate_limited' || !operation.retryAt || operation.retryAt > Date.now()) return operation;
@@ -165,7 +165,7 @@ async function ensureContent(tabId) {
   try { await chrome.tabs.sendMessage(tabId, { type: 'F4F_PING' }); }
   catch {
     await chrome.scripting.insertCSS({ target: { tabId }, files: ['verification.css'] });
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['theme.js', 'localization.js', 'list-controls.js', 'content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['theme.js', 'localization.js', 'list-controls.js', 'result-copy.js', 'content.js'] });
   }
 }
 async function assist(operation) {
@@ -200,7 +200,7 @@ async function start() {
       await chrome.tabs.create({ url: 'https://www.instagram.com/', active: true });
     if (!existing) await chrome.windows.update(tab.windowId, { focused: true });
     operation = await save({ ...operation, tabId: tab.id, status: 'waiting',
-      message: 'Opening Instagram’s Profile section…' });
+      message: 'Opening your profile on Instagram…' });
     await assist(operation);
     return operation;
   } catch (error) { return fail(operation, error.message, 'navigation_error'); }
@@ -231,7 +231,7 @@ async function handle(message, sender) {
       const operation = await read();
       if (operation.status !== 'waiting') return start();
       const next = await save({ ...operation, reason: undefined,
-        message: 'Opening Instagram’s Profile section…' });
+        message: 'Opening your profile on Instagram…' });
       await foreground(next.tabId);
       await ensureContent(next.tabId);
       await chrome.tabs.sendMessage(next.tabId, { type: 'F4F_RESET_WAIT' });
@@ -298,7 +298,7 @@ async function handle(message, sender) {
     const username = new URL(sender.url).pathname.match(/^\/([a-zA-Z0-9._]{1,30})\/?$/)?.[1];
     const running = await save({ ...operation, username, documentId: sender.documentId, scanStartedAt, deadline,
       status: 'running', reason: undefined,
-      message: 'Checking following, then followers…' });
+      message: 'Starting with the accounts you follow.' });
     try {
       const target = sender.documentId ? { tabId: operation.tabId, documentIds: [sender.documentId] } : { tabId: operation.tabId };
       await chrome.scripting.executeScript({ target,
@@ -322,7 +322,7 @@ async function handle(message, sender) {
     if (state.reason === 'waiting_for_instagram' && last?.list === list && collected <= last.collected && collected < expected) {
       return save({ ...state, progress, message: waitingForList(progress) });
     }
-    const detail = `Checking ${listLabel(list)}… ${countDetail(progress)}`;
+    const detail = `${listLabel(list)} · ${countDetail(progress)}`;
     return save({ ...state, progress, reason: undefined, message: detail });
   }
   if (message.type === 'F4F_FINISHED' && operation.status === 'running') {
@@ -341,7 +341,7 @@ async function handle(message, sender) {
       return fail(operation, 'The checker output could not be read. Please retry.');
     }
     try {
-      return await save({ ...operation, status: 'completed', reason: undefined, message: 'Checking Complete',
+      return await save({ ...operation, status: 'completed', reason: undefined, message: 'Your results are ready on Instagram.',
         finishedAt: Date.now(), results, validation });
     } catch {
       return fail(operation, 'The results exceed session storage capacity. The verified list is still on Instagram.', 'storage_error');

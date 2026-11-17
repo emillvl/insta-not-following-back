@@ -126,11 +126,12 @@ const fixture = await unpackedFixture((req, res) => {
       url.searchParams.has('max_id') ? 'page' : 'open'}` : 'feed';
     const index = current.requests.filter(request => request.category === category).length;
     const rejection = current.reject?.(category, index);
-    const request = { category, status: rejection ? 429 : 200, at: Date.now() };
+    const request = { category, status: rejection ? 429 : 200, at: Date.now(), arrival: performance.now() };
     current.requests.push(request);
     const respond = () => {
       if (rejection?.header !== undefined) res.setHeader('Retry-After', rejection.header);
       request.respondedAt = Date.now();
+      request.responseSent = performance.now();
       res.writeHead(request.status).end();
     };
     if (rejection?.delay) setTimeout(respond, rejection.delay);
@@ -315,7 +316,7 @@ try {
     }, { scale: 24, verify: async ({ page, until, previous, requests, scale }) => {
       const state = await until(state => finished(state, previous));
       assert.equal(state.status, 'error');
-      assert.match(state.message, /HTTP 429 while loading Following at .+supplied no usable retry time/);
+      assert.match(state.message, /HTTP 429 while loading Following at .+\nInstagram supplied no usable retry time/);
       await assertClean(page);
       const popup = await openPopup();
       await popup.locator('#start').filter({ hasText: 'Retry Checking' }).waitFor();
@@ -409,16 +410,18 @@ try {
       assert.equal(await page.locator('[data-f4f-results]').count(), 0);
       return state;
     } });
+    const searchRetrySeconds = 8;
     await scenario('a valid exact-search replay uses one permit and keeps searches hidden', { ...duplicates,
-      reject: (category, index) => category === 'following.search' && index === 0 && { header: '8' }
-    }, { verify: async ({ page, until, previous, requests, realStart, scale }) => {
-      const paused = await until(state => state?.reason === 'rate_limited');
+      reject: (category, index) => category === 'following.search' && index === 0 && { header: String(searchRetrySeconds) }
+    }, { verify: async ({ page, until, previous, requests, scale }) => {
+      await until(state => state?.reason === 'rate_limited');
       assert.deepEqual(categories(requests), [...duplicateOrder, 'following.search']);
       const state = await until(state => finished(state, previous));
       assertResult(state, duplicates);
       await assertClean(page);
       assert.deepEqual(categories(requests), [...duplicateOrder, ...repeated('following.search', 3)]);
-      assert.ok(realStart + (requests[4].at - realStart) * scale >= paused.retryAt);
+      const waitMs = requests[4].arrival - requests[3].responseSent;
+      assert.ok(waitMs + 1 >= searchRetrySeconds * 1000 / scale, `Search replay arrived after ${waitMs} ms`);
       assert.deepEqual(await page.evaluate(() => metrics.searches), [omitted[1], ...omitted.slice(1)]);
       assert.deepEqual(await page.evaluate(() => metrics.searchPresentation), repeated(['0', false, true], 3));
       return state;
